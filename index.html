@@ -69,6 +69,345 @@ const timerBar = document.getElementById('timer-bar');
 const timerFill = document.getElementById('timer-fill');
 
 const W = 1200, H = 750;
+
+// --- Pixel Sprite System ---
+// Palette indices: 0=transparent, 1=jersey, 2=jersey_dark, 3=skin, 4=skin_shadow,
+// 5=hair, 6=white(shorts/socks), 7=boots, 8=outline
+const TEAM_PALETTES = {
+  0: { 1: '#2196F3', 2: '#1565C0', 3: '#FFCC80', 4: '#E8A850', 5: '#5D4037', 6: '#fff', 7: '#222', 8: '#1a1a1a' },
+  1: { 1: '#f44336', 2: '#c62828', 3: '#FFCC80', 4: '#E8A850', 5: '#222', 6: '#fff', 7: '#222', 8: '#1a1a1a' },
+};
+
+// Animation config
+const ANIM_TICK_RATE = 5; // frames per animation step (faster for visible run cycle)
+let animTick = 0;
+let animFrame = 0;
+
+// Hover state for jersey number tooltip
+let hoveredPlayer = null;
+
+// Sprite definitions: 24x24 grids
+// Each sprite set: { down: [...frames], up: [...frames], left: [...frames], right: [...frames] }
+
+function makeSprites() {
+  // --- IDLE frames (2 frames: standing, slight bounce) ---
+  const idleDown0 = [
+    [0,0,0,0,0,0,0,0,0,5,5,5,5,5,5,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,3,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,8,3,3,3,8,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,4,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,8,3,3,3,3,3,3,8,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,8,3,3,3,3,8,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,3,1,1,1,1,1,1,1,1,3,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,1,1,1,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,6,6,6,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,6,6,6,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,2,1,1,1,1,1,1,1,2,2,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,3,2,2,1,1,1,2,2,2,3,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,3,2,2,2,2,2,2,3,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,6,6,0,0,6,6,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,6,6,0,0,6,6,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,6,6,0,0,6,6,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,6,6,0,0,6,6,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,7,7,0,0,7,7,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,7,7,0,0,7,7,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,7,7,7,0,0,7,7,7,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ];
+
+  const idleDown1 = [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,5,5,5,5,5,5,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,3,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,8,3,3,3,8,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,4,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,8,3,3,3,3,3,3,8,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,8,3,3,3,3,8,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,3,1,1,1,1,1,1,1,1,3,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,6,6,6,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,6,6,6,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,2,1,1,1,1,1,1,1,2,2,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,3,2,2,1,1,1,2,2,2,3,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,3,2,2,2,2,2,2,3,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,6,6,0,0,6,6,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,6,6,0,0,6,6,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,6,6,0,0,6,6,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,7,7,0,0,7,7,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,7,7,0,0,7,7,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,7,7,7,0,0,7,7,7,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ];
+
+  // --- RUN frames (3 frames: dramatic leg cycle) ---
+  // Frame 0: left leg forward, right leg back (wide stride)
+  const runDown0 = [
+    [0,0,0,0,0,0,0,0,0,5,5,5,5,5,5,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,3,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,8,3,3,3,8,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,4,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,8,3,3,3,3,3,3,8,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,8,3,3,3,3,8,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,3,1,1,1,1,1,1,1,1,3,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,1,1,1,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,6,6,6,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,2,1,1,1,1,1,1,1,2,2,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,3,2,2,2,2,2,2,2,3,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,6,6,0,0,0,0,0,0,0,6,6,0,0,0,0,0,0,0],
+    [0,0,0,0,0,6,6,0,0,0,0,0,0,0,0,0,6,6,0,0,0,0,0,0],
+    [0,0,0,0,6,6,0,0,0,0,0,0,0,0,0,0,0,6,6,0,0,0,0,0],
+    [0,0,0,7,7,0,0,0,0,0,0,0,0,0,0,0,0,0,7,7,0,0,0,0],
+    [0,0,7,7,7,0,0,0,0,0,0,0,0,0,0,0,0,0,7,7,7,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ];
+
+  // Frame 1: legs together (passing through center)
+  const runDown1 = [
+    [0,0,0,0,0,0,0,0,0,5,5,5,5,5,5,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,3,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,8,3,3,3,8,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,4,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,8,3,3,3,3,3,3,8,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,8,3,3,3,3,8,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,3,1,1,1,1,1,1,1,1,3,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,1,1,1,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,6,6,6,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,2,1,1,1,1,1,1,1,2,2,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,3,2,2,2,2,2,2,2,3,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,6,6,6,6,6,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,6,6,6,6,6,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,7,7,7,7,7,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,7,7,7,7,7,7,7,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ];
+
+  // Frame 2: right leg forward, left leg back (mirror of frame 0)
+  const runDown2 = [
+    [0,0,0,0,0,0,0,0,0,5,5,5,5,5,5,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,3,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,8,3,3,3,8,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,4,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,8,3,3,3,3,3,3,8,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,8,3,3,3,3,8,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,3,1,1,1,1,1,1,1,1,3,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,1,1,1,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,6,6,6,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,2,1,1,1,1,1,1,1,2,2,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,3,2,2,2,2,2,2,2,3,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,6,6,0,0,0,6,6,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,6,6,0,0,0,0,0,0,6,6,0,0,0,0,0,0,0],
+    [0,0,0,0,0,6,6,0,0,0,0,0,0,0,0,0,6,6,0,0,0,0,0,0],
+    [0,0,0,0,7,7,0,0,0,0,0,0,0,0,0,0,0,7,7,0,0,0,0,0],
+    [0,0,0,7,7,7,0,0,0,0,0,0,0,0,0,0,0,7,7,7,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ];
+
+  // --- KICK frames (2 frames) ---
+  const kickDown0 = [
+    [0,0,0,0,0,0,0,0,0,5,5,5,5,5,5,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,3,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,8,3,3,3,8,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,4,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,8,3,3,3,3,3,3,8,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,8,3,3,3,3,8,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,3,1,1,1,1,1,1,1,1,3,0,0,0,0,0,0,0],
+    [0,0,0,0,0,3,3,1,1,1,1,1,1,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,6,6,6,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,2,1,1,1,1,1,1,1,2,2,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,3,2,2,2,2,2,2,2,3,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,6,6,0,0,0,6,6,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,6,6,0,0,0,0,6,6,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,7,7,0,0,0,0,0,6,6,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,7,7,7,0,0,0,0,0,0,7,7,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7,7,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,7,7,7,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ];
+
+  const kickDown1 = [
+    [0,0,0,0,0,0,0,0,0,5,5,5,5,5,5,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,5,5,5,5,5,5,5,5,5,5,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,3,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,8,3,3,3,8,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,8,3,3,3,4,3,3,3,3,8,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,8,3,3,3,3,3,3,8,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,8,3,3,3,3,8,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,3,3,3,1,1,1,1,1,1,1,1,3,3,3,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,1,1,1,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,1,1,1,6,6,6,1,1,1,1,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,3,2,1,1,1,1,1,1,1,2,2,3,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,3,2,2,2,2,2,2,2,3,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,6,6,0,0,6,6,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,6,6,0,0,6,6,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,7,7,0,0,7,7,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,7,7,7,0,7,7,7,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ];
+
+  // Mirror helper: flip a sprite horizontally
+  function flipH(sprite) {
+    return sprite.map(row => [...row].reverse());
+  }
+
+  // All directions use the same body — only flipH for left.
+  // No vertical flip (that puts them on their heads).
+  return {
+    idle: {
+      down: [idleDown0],
+      up: [idleDown0],
+      right: [idleDown0],
+      left: [flipH(idleDown0)],
+    },
+    run: {
+      down: [runDown0, runDown1, runDown2],
+      up: [runDown0, runDown1, runDown2],
+      right: [runDown0, runDown1, runDown2],
+      left: [flipH(runDown0), flipH(runDown1), flipH(runDown2)],
+    },
+    kick: {
+      down: [kickDown0, kickDown1],
+      up: [kickDown0, kickDown1],
+      right: [kickDown0, kickDown1],
+      left: [flipH(kickDown0), flipH(kickDown1)],
+    },
+  };
+}
+
+const SPRITES = makeSprites();
+const SPRITE_SCALE = 1.2; // each pixel = 1.2 canvas pixels
+
+// Pre-render sprites to offscreen canvases for performance
+const spriteCache = {};
+
+function getSpriteKey(sprite, palette) {
+  // Use leg rows (14-18) to differentiate run frames, plus palette color
+  return palette[1] + '_' + sprite[14].join('') + sprite[16].join('') + sprite[18].join('');
+}
+
+function renderSpriteToCanvas(sprite, palette) {
+  const size = 24;
+  const scale = SPRITE_SCALE;
+  const c = document.createElement('canvas');
+  c.width = Math.ceil(size * scale);
+  c.height = Math.ceil(size * scale);
+  const sctx = c.getContext('2d');
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const idx = sprite[y][x];
+      if (idx === 0) continue;
+      sctx.fillStyle = palette[idx];
+      sctx.fillRect(Math.floor(x * scale), Math.floor(y * scale), Math.ceil(scale), Math.ceil(scale));
+    }
+  }
+  return c;
+}
+
+function getCachedSprite(sprite, palette) {
+  const key = getSpriteKey(sprite, palette);
+  if (!spriteCache[key]) {
+    spriteCache[key] = renderSpriteToCanvas(sprite, palette);
+  }
+  return spriteCache[key];
+}
+
+// Get player facing direction from movement
+function getFacing(p) {
+  const dx = p.tx - p.x;
+  const dy = p.ty - p.y;
+  const d = Math.sqrt(dx * dx + dy * dy);
+  if (d < 3) return p._lastFacing || 'down';
+  const angle = Math.atan2(dy, dx);
+  // Snap to 4 directions
+  if (angle > -Math.PI/4 && angle <= Math.PI/4) return 'right';
+  if (angle > Math.PI/4 && angle <= 3*Math.PI/4) return 'down';
+  if (angle > -3*Math.PI/4 && angle <= -Math.PI/4) return 'up';
+  return 'left';
+}
+
+// Get animation state based on actual position change, not intent
+function getAnimState(p) {
+  if (p._kicking) return 'kick';
+  // Compare to previous frame position — actual movement, not distance-to-target
+  // Threshold must be higher than separation nudge to avoid jitter-triggered animation
+  const dx = p.x - (p._prevX || p.x);
+  const dy = p.y - (p._prevY || p.y);
+  if (dx * dx + dy * dy > 4) return 'run';
+  return 'idle';
+}
+
+// Draw a pixel sprite for a player
+function drawPixelPlayer(p, palette) {
+  const anim = getAnimState(p);
+  const facing = getFacing(p);
+  p._lastFacing = facing;
+  const frames = SPRITES[anim][facing];
+  const frameIdx = animFrame % frames.length;
+  const sprite = frames[frameIdx];
+  const cached = getCachedSprite(sprite, palette);
+  const size = 24 * SPRITE_SCALE;
+  // Draw centered on player position, shifted up so feet are at p.y
+  ctx.drawImage(cached, p.x - size / 2, p.y - size + 6, size, size);
+}
+
+// Mouse tracking for hover
+let mouseX = 0, mouseY = 0;
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouseX = (e.clientX - rect.left) * (W / rect.width);
+  mouseY = (e.clientY - rect.top) * (H / rect.height);
+
+  // Check hover
+  hoveredPlayer = null;
+  const allP = [...teamA, ...teamB];
+  for (const p of allP) {
+    const dx = p.x - mouseX, dy = p.y - mouseY;
+    if (Math.sqrt(dx * dx + dy * dy) < p.radius + 6) {
+      hoveredPlayer = p;
+      break;
+    }
+  }
+});
 canvas.width = W; canvas.height = H;
 
 const ballSpeedMult = 0.2;
@@ -396,6 +735,13 @@ playBtn.addEventListener('click', () => {
   playTimer = PLAY_DURATION;
   playBtn.disabled = true;
   timerBar.style.display = 'block';
+  selected = null;
+
+  // Store start positions for move radius enforcement
+  for (const p of [...teamA, ...teamB]) {
+    p._startX = p.x;
+    p._startY = p.y;
+  }
 
   // Execute planned passes
   for (const p of teamA) {
@@ -438,94 +784,362 @@ window.addEventListener('keydown', (e) => {
 });
 
 // --- AI planning ---
-function planAI() {
-  const closestToBall = teamB.reduce((best, p) => {
-    const d = dist(p, ball);
-    return d < best.d ? { p, d } : best;
-  }, { p: null, d: Infinity });
 
-  for (const p of teamB) {
-    let targetX, targetY;
+// Team mood system — picked each round based on game state + randomness
+let aiMood = 'balanced';
 
-    if (possession && possession.side === 1 && possession === p) {
-      // Has ball — dribble toward goal
-      const goalX = 20;
-      const goalY = H / 2 + (Math.random() - 0.5) * 80;
-      const dx = goalX - p.x, dy = goalY - p.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      targetX = p.x + (dx / d) * Math.min(MOVE_RADIUS, d);
-      targetY = p.y + (dy / d) * Math.min(MOVE_RADIUS, d);
+function pickAIMood() {
+  const scoreDiff = score[1] - score[0]; // positive = AI winning
+  const ballInAIHalf = ball.x > W / 2;
 
-      // If close to goal, plan a shot
-      if (p.x < 200) {
-        p.plannedPass = { x: 10, y: H / 2 + (Math.random() - 0.5) * GOAL_H * 0.7, isShot: true };
-      }
-    } else if (possession && possession.side === 0) {
-      // Team A has ball — chase carrier
-      if (p === closestToBall.p || (p.index >= 1 && p.index <= 4 && dist(p, possession) < 350)) {
-        const dx = possession.x - p.x, dy = possession.y - p.y;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        targetX = p.x + (dx / d) * Math.min(MOVE_RADIUS, d);
-        targetY = p.y + (dy / d) * Math.min(MOVE_RADIUS, d);
-        p.tackleTarget = possession;
-      } else if (p.index === 0) {
-        targetX = p.homeX;
-        targetY = clamp(ball.y, GOAL_Y + 20, GOAL_Y + GOAL_H - 20);
-      } else {
-        const bx = (ball.x / W - 0.5) * 120;
-        const by = (ball.y / H - 0.5) * 60;
-        targetX = p.homeX + bx;
-        targetY = p.homeY + by;
-      }
-    } else if (!possession) {
-      // Loose ball
-      if (p === closestToBall.p || (p.index >= 9 && dist(p, ball) < 300)) {
-        const dx = ball.x - p.x, dy = ball.y - p.y;
-        const d = Math.sqrt(dx * dx + dy * dy) || 1;
-        targetX = p.x + (dx / d) * Math.min(MOVE_RADIUS, d);
-        targetY = p.y + (dy / d) * Math.min(MOVE_RADIUS, d);
-      } else if (p.index === 0) {
-        targetX = p.homeX;
-        targetY = clamp(ball.y, GOAL_Y + 20, GOAL_Y + GOAL_H - 20);
-      } else {
-        const bx = (ball.x / W - 0.5) * 120;
-        const by = (ball.y / H - 0.5) * 60;
-        targetX = p.homeX + bx;
-        targetY = p.homeY + by;
-      }
+  // Weight table: [pressing, counter, possession, parkbus]
+  let w = [25, 25, 25, 25];
+
+  if (scoreDiff < 0) { w[0] += 30; w[2] += 15; w[3] -= 15; } // losing: press more
+  if (scoreDiff > 0) { w[3] += 25; w[1] += 15; w[0] -= 15; } // winning: sit back
+  if (scoreDiff === 0 && round > 20) { w[0] += 20; w[2] += 10; } // late tie: push
+  if (ballInAIHalf) { w[0] += 10; w[3] += 10; } // ball in our half: defensive bias
+  if (!ballInAIHalf) { w[1] += 15; w[2] += 10; } // ball in their half: keep possession
+
+  // Clamp negatives
+  w = w.map(v => Math.max(5, v));
+  const total = w.reduce((a, b) => a + b);
+  let r = Math.random() * total;
+  const moods = ['pressing', 'counter', 'possession', 'parkbus'];
+  for (let i = 0; i < 4; i++) {
+    r -= w[i];
+    if (r <= 0) return moods[i];
+  }
+  return 'possession';
+}
+
+// Role helper: 0=GK, 1-4=DEF, 5-8=MID, 9-10=FWD
+function aiRole(p) {
+  if (p.index === 0) return 'gk';
+  if (p.index <= 4) return 'def';
+  if (p.index <= 8) return 'mid';
+  return 'fwd';
+}
+
+// Find open space — pick a random point biased by zone, avoid clustering
+function findSpace(p, zoneX, zoneY, spread) {
+  let bestX = zoneX + (Math.random() - 0.5) * spread;
+  let bestY = zoneY + (Math.random() - 0.5) * spread * 0.8;
+  // Nudge away from nearest teammate
+  for (const t of teamB) {
+    if (t === p) continue;
+    const dx = bestX - t.x, dy = bestY - t.y;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d < 80) {
+      bestX += (dx / (d || 1)) * 30;
+      bestY += (dy / (d || 1)) * 30;
+    }
+  }
+  return { x: clamp(bestX, 30, W - 30), y: clamp(bestY, 30, H - 30) };
+}
+
+// Check if a teammate is "open" (no team A player within radius)
+function isOpen(p, radius) {
+  for (const a of teamA) {
+    if (dist(a, p) < radius) return false;
+  }
+  return true;
+}
+
+// Nearest team A player to a point
+function nearestOpponent(x, y) {
+  let best = null, bestD = Infinity;
+  for (const a of teamA) {
+    const d = Math.sqrt((a.x - x) ** 2 + (a.y - y) ** 2);
+    if (d < bestD) { best = a; bestD = d; }
+  }
+  return { p: best, d: bestD };
+}
+
+function aiSetTarget(p, tx, ty) {
+  const dx = tx - p.x, dy = ty - p.y;
+  const d = Math.sqrt(dx * dx + dy * dy);
+  if (d > MOVE_RADIUS) {
+    p.tx = p.x + (dx / d) * MOVE_RADIUS;
+    p.ty = p.y + (dy / d) * MOVE_RADIUS;
+  } else {
+    p.tx = tx; p.ty = ty;
+  }
+}
+
+// Score an action for a player given mood — returns {action, score, target}
+function scoreActions(p, mood) {
+  const role = aiRole(p);
+  const hasBall = possession === p;
+  const teamHasBall = possession && possession.side === 1;
+  const oppHasBall = possession && possession.side === 0;
+  const actions = [];
+  const noise = () => Math.random() * 20; // unpredictability
+
+  // --- GK always special ---
+  if (role === 'gk' && !hasBall) {
+    const ty = clamp(ball.y, GOAL_Y + 20, GOAL_Y + GOAL_H - 20);
+    actions.push({ action: 'hold', score: 100, tx: p.homeX, ty });
+    // GK comes out for loose ball if very close
+    if (!possession && dist(p, ball) < 150) {
+      actions.push({ action: 'chase', score: 80 + noise(), tx: ball.x, ty: ball.y });
+    }
+    return actions;
+  }
+
+  // --- PRESS: close down ball carrier ---
+  if (oppHasBall && role !== 'gk') {
+    const dp = dist(p, possession);
+    let pressScore = 30 + noise();
+    if (mood === 'pressing') pressScore += 40;
+    if (mood === 'counter') pressScore -= 10;
+    if (mood === 'parkbus') pressScore -= 20;
+    if (dp < 250) pressScore += 30; // closer = more likely to press
+    if (role === 'fwd') pressScore += 10; // forwards press from front
+    if (role === 'def' && dp > 300) pressScore -= 30; // defenders don't chase far
+    actions.push({ action: 'press', score: pressScore, tx: possession.x, ty: possession.y, tackle: true });
+  }
+
+  // --- MARK: shadow nearest opponent ---
+  if (oppHasBall && (role === 'def' || role === 'mid')) {
+    // Find nearest team A player that isn't the ball carrier
+    let markTarget = null, markDist = Infinity;
+    for (const a of teamA) {
+      if (a === possession) continue;
+      const d = dist(p, a);
+      // Prefer marking players in dangerous positions
+      const dangerBonus = (a.x > W / 2) ? 30 : 0;
+      if (d - dangerBonus < markDist) { markTarget = a; markDist = d - dangerBonus; }
+    }
+    if (markTarget) {
+      let markScore = 25 + noise();
+      if (mood === 'parkbus') markScore += 30;
+      if (mood === 'pressing') markScore -= 10;
+      if (role === 'def') markScore += 15;
+      // Position between mark target and our goal
+      const mx = markTarget.x * 0.6 + (W - 50) * 0.4;
+      const my = markTarget.y;
+      actions.push({ action: 'mark', score: markScore, tx: mx, ty: my });
+    }
+  }
+
+  // --- HOLD SHAPE: shift with ball position ---
+  if (!hasBall) {
+    let holdScore = 20 + noise();
+    if (mood === 'parkbus') holdScore += 25;
+    if (mood === 'counter' && !teamHasBall) holdScore += 20;
+    // Shift home position based on ball
+    const shiftX = (ball.x / W - 0.5) * (mood === 'parkbus' ? 80 : 140);
+    const shiftY = (ball.y / H - 0.5) * 60;
+    let hx = p.homeX + shiftX;
+    let hy = p.homeY + shiftY;
+    // Park the bus: compress toward own goal
+    if (mood === 'parkbus') { hx = Math.max(hx, W * 0.55); }
+    actions.push({ action: 'hold', score: holdScore, tx: hx, ty: hy });
+  }
+
+  // --- MOVE TO SPACE: find open field ---
+  if (teamHasBall && !hasBall) {
+    let spaceScore = 20 + noise();
+    if (mood === 'possession') spaceScore += 30;
+    if (mood === 'counter' && teamHasBall) spaceScore += 25;
+    // Zone depends on role
+    let zx, zy;
+    if (role === 'fwd') {
+      zx = W * 0.2 + Math.random() * W * 0.25; // attacking third
+      zy = H * 0.5;
+    } else if (role === 'mid') {
+      zx = W * 0.35 + Math.random() * W * 0.2;
+      zy = p.homeY;
     } else {
-      // Teammate has ball
-      if (p.index === 0) {
-        targetX = p.homeX;
-        targetY = clamp(ball.y, GOAL_Y + 20, GOAL_Y + GOAL_H - 20);
-      } else {
-        const bx = (ball.x / W - 0.5) * 150;
-        const by = (ball.y / H - 0.5) * 60;
-        targetX = p.homeX + bx - 50;
-        targetY = p.homeY + by;
-      }
+      zx = W * 0.55 + Math.random() * W * 0.15;
+      zy = p.homeY;
+    }
+    const sp = findSpace(p, zx, zy, 200);
+    actions.push({ action: 'space', score: spaceScore, tx: sp.x, ty: sp.y });
+  }
+
+  // --- MAKE A RUN: sprint toward goal ---
+  if (teamHasBall && !hasBall && (role === 'fwd' || role === 'mid')) {
+    let runScore = 15 + noise();
+    if (mood === 'counter' && teamHasBall) runScore += 35;
+    if (mood === 'pressing') runScore += 15;
+    if (role === 'fwd') runScore += 20;
+    // Run toward a point near their goal
+    const runX = 50 + Math.random() * 150;
+    const runY = H * 0.2 + Math.random() * H * 0.6;
+    actions.push({ action: 'run', score: runScore, tx: runX, ty: runY });
+  }
+
+  // --- CHASE LOOSE BALL ---
+  if (!possession) {
+    const db = dist(p, ball);
+    let chaseScore = 50 + noise();
+    if (db < 200) chaseScore += 40;
+    if (role === 'fwd' || role === 'mid') chaseScore += 15;
+    if (role === 'def' && db > 300) chaseScore -= 30;
+    actions.push({ action: 'chase', score: chaseScore, tx: ball.x, ty: ball.y });
+  }
+
+  // --- WITH BALL: dribble / pass / shoot ---
+  if (hasBall) {
+    // Shoot if close enough
+    if (p.x < 250) {
+      const shotY = H / 2 + (Math.random() - 0.5) * GOAL_H * 0.8;
+      actions.push({ action: 'shoot', score: 80 + noise(), tx: 10, ty: shotY });
     }
 
-    if (targetX !== undefined) {
-      const dx = targetX - p.x, dy = targetY - p.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d > MOVE_RADIUS) {
-        p.tx = p.x + (dx / d) * MOVE_RADIUS;
-        p.ty = p.y + (dy / d) * MOVE_RADIUS;
-      } else {
-        p.tx = targetX;
-        p.ty = targetY;
+    // Dribble toward goal
+    const goalX = 50, goalY = H / 2 + (Math.random() - 0.5) * 100;
+    let dribScore = 35 + noise();
+    if (mood === 'counter') dribScore += 20;
+    const opp = nearestOpponent(p.x, p.y);
+    if (opp.d < 60) dribScore -= 25; // pressure: prefer passing
+    actions.push({ action: 'dribble', score: dribScore, tx: goalX, ty: goalY });
+
+    // Pass to open teammate
+    for (const t of teamB) {
+      if (t === p || t.index === 0) continue;
+      const td = dist(p, t);
+      if (td < 50 || td > 500) continue; // too close or too far
+      const open = isOpen(t, 80);
+      let passScore = 25 + noise();
+      if (mood === 'possession') passScore += 25;
+      if (open) passScore += 20;
+      if (t.x < p.x) passScore += 10; // forward pass bonus (team B attacks left)
+      if (opp.d < 60) passScore += 20; // under pressure: pass!
+      // Prefer forwards
+      if (aiRole(t) === 'fwd') passScore += 10;
+      actions.push({ action: 'pass', score: passScore, tx: t.x, ty: t.y, passTarget: t });
+    }
+  }
+
+  return actions;
+}
+
+function planAI() {
+  aiMood = pickAIMood();
+
+  const MAX_BALL_CHASERS = 2;
+
+  // First pass: score all actions for each player
+  const playerActions = [];
+  for (const p of teamB) {
+    if (p.index === 0 && possession !== p) {
+      playerActions.push({ p, best: null, gk: true });
+      continue;
+    }
+    const actions = scoreActions(p, aiMood);
+    actions.sort((a, b) => b.score - a.score);
+    playerActions.push({ p, actions, best: null, gk: false });
+  }
+
+  // Determine who gets to chase/press the ball (max 2, pick closest)
+  const ballChasers = playerActions
+    .filter(pa => !pa.gk && pa.actions && pa.actions.length > 0 && (pa.actions[0].action === 'chase' || pa.actions[0].action === 'press'))
+    .sort((a, b) => dist(a.p, ball) - dist(b.p, ball));
+
+  const allowedChasers = new Set(ballChasers.slice(0, MAX_BALL_CHASERS).map(pa => pa.p));
+
+  // Second pass: assign actions, redirecting excess chasers to mark/hold
+  for (const pa of playerActions) {
+    const { p } = pa;
+
+    if (pa.gk) {
+      const ty = clamp(ball.y, GOAL_Y + 20, GOAL_Y + GOAL_H - 20);
+      aiSetTarget(p, p.homeX, ty);
+      if (!possession && dist(p, ball) < 120) {
+        aiSetTarget(p, ball.x, ball.y);
+      }
+      continue;
+    }
+
+    const { actions } = pa;
+    if (!actions || actions.length === 0) continue;
+
+    // Pick best action, but skip chase/press if not in allowed chasers
+    let best = null;
+    for (const a of actions) {
+      if ((a.action === 'chase' || a.action === 'press') && !allowedChasers.has(p)) continue;
+      best = a;
+      break;
+    }
+    if (!best) best = actions[actions.length - 1]; // fallback to lowest-scored
+
+    if (best.action === 'shoot') {
+      p.plannedPass = { x: best.tx, y: best.ty, isShot: true };
+      const goalDir = { x: best.tx - p.x, y: best.ty - p.y };
+      const gd = Math.sqrt(goalDir.x ** 2 + goalDir.y ** 2) || 1;
+      aiSetTarget(p, p.x + (goalDir.x / gd) * Math.min(MOVE_RADIUS * 0.5, gd), p.y + (goalDir.y / gd) * Math.min(MOVE_RADIUS * 0.5, gd));
+    } else if (best.action === 'pass') {
+      p.plannedPass = { x: best.tx, y: best.ty };
+      p.passFirst = true;
+    } else if (best.action === 'press') {
+      aiSetTarget(p, best.tx, best.ty);
+      if (best.tackle) p.tackleTarget = possession;
+    } else {
+      aiSetTarget(p, best.tx, best.ty);
+    }
+  }
+
+  // Make pass receivers hold position near where the pass is aimed
+  for (const p of teamB) {
+    if (p.plannedPass && !p.plannedPass.isShot) {
+      // Find the teammate closest to the pass target
+      const pt = p.plannedPass;
+      let receiver = null, bestD = Infinity;
+      for (const t of teamB) {
+        if (t === p || t.index === 0) continue;
+        const d = Math.sqrt((t.x - pt.x) ** 2 + (t.y - pt.y) ** 2);
+        if (d < bestD) { receiver = t; bestD = d; }
+      }
+      if (receiver && bestD < 100) {
+        // Tell receiver to stay put or move only slightly toward the pass
+        aiSetTarget(receiver, pt.x, pt.y);
+        receiver._receivingPass = true;
       }
     }
   }
 
-  // Execute AI planned passes/shots
+  // Spread out AI targets that are too close together
+  const MIN_TARGET_DIST = 60;
+  for (let i = 0; i < teamB.length; i++) {
+    for (let j = i + 1; j < teamB.length; j++) {
+      const a = teamB[i], b = teamB[j];
+      // Skip GK and ball carrier
+      if (a.index === 0 || b.index === 0) continue;
+      if (possession === a || possession === b) continue;
+      const dx = b.tx - a.tx, dy = b.ty - a.ty;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < MIN_TARGET_DIST && d > 0.1) {
+        const push = (MIN_TARGET_DIST - d) / 2;
+        const nx = dx / d, ny = dy / d;
+        // Push targets apart, re-clamp to move radius
+        a.tx -= nx * push;
+        a.ty -= ny * push;
+        b.tx += nx * push;
+        b.ty += ny * push;
+        a.tx = clamp(a.tx, 30, W - 30);
+        a.ty = clamp(a.ty, 30, H - 30);
+        b.tx = clamp(b.tx, 30, W - 30);
+        b.ty = clamp(b.ty, 30, H - 30);
+      }
+    }
+  }
+
+  // Execute AI planned passes/shots immediately for pass-first
   for (const p of teamB) {
     if (p.plannedPass && possession === p) {
       if (p.plannedPass.isShot) {
-        kickBall(p.plannedPass.x, p.plannedPass.y, 5 + Math.random() * 2);
+        // Shots execute after dribble arrives (handled in movePlayer)
+      } else if (p.passFirst) {
+        const pp = p.plannedPass;
+        const passDist = Math.sqrt((pp.x - ball.x) ** 2 + (pp.y - ball.y) ** 2);
+        const power = Math.max(6, passDist / 8);
+        kickBall(pp.x, pp.y, power);
+        p.plannedPass = null;
+        p.passFirst = false;
       }
-      p.plannedPass = null;
     }
   }
 }
@@ -550,12 +1164,16 @@ function autoplanGK() {
 function movePlayer(p) {
   if (p.tackleTarget) {
     if (possession === p.tackleTarget) {
-      // Track the target, but stay within original move radius
-      const dx = p.tackleTarget.x - p.x, dy = p.tackleTarget.y - p.y;
+      // Track the target, but clamp to MOVE_RADIUS from start position
+      const tx = p.tackleTarget.x, ty = p.tackleTarget.y;
+      const dx = tx - p._startX, dy = ty - p._startY;
       const d = Math.sqrt(dx * dx + dy * dy);
-      if (d > 2) {
-        p.tx = p.tackleTarget.x;
-        p.ty = p.tackleTarget.y;
+      if (d <= MOVE_RADIUS) {
+        p.tx = tx;
+        p.ty = ty;
+      } else {
+        p.tx = p._startX + (dx / d) * MOVE_RADIUS;
+        p.ty = p._startY + (dy / d) * MOVE_RADIUS;
       }
     } else {
       p.tackleTarget = null;
@@ -564,13 +1182,17 @@ function movePlayer(p) {
 
   const dx = p.tx - p.x, dy = p.ty - p.y;
   const d = Math.sqrt(dx * dx + dy * dy);
+  p._moving = false;
+  p._kicking = false;
   if (d > 2) {
     let spd = p.speed * GAME_SPEED;
     if (possession === p) spd *= DRIBBLE_SPEED_PENALTY;
     p.x += (dx / d) * spd;
     p.y += (dy / d) * spd;
+    p._moving = true;
   } else if (possession === p && p.plannedPass) {
     // Arrived at dribble target — execute planned pass
+    p._kicking = true;
     const pp = p.plannedPass;
     const passDist = Math.sqrt((pp.x - p.x) ** 2 + (pp.y - p.y) ** 2);
     const power = Math.max(6, passDist / 8);
@@ -600,17 +1222,30 @@ function separatePlayers(allPlayers) {
       const a = allPlayers[i], b = allPlayers[j];
       const dx = b.x - a.x, dy = b.y - a.y;
       const d = Math.sqrt(dx * dx + dy * dy);
-      if (d < minDist && d > 0.1) {
-        const overlap = (minDist - d) / 2;
-        const nx = dx / d, ny = dy / d;
-        a.x -= nx * overlap;
-        a.y -= ny * overlap;
-        b.x += nx * overlap;
-        b.y += ny * overlap;
-      } else if (d <= 0.1) {
-        // Nearly identical position — nudge randomly
-        a.x += (Math.random() - 0.5) * 4;
-        a.y += (Math.random() - 0.5) * 4;
+      if (d < minDist) {
+        let nx, ny;
+        if (d > 0.1) {
+          nx = dx / d;
+          ny = dy / d;
+        } else {
+          // Deterministic nudge based on index — no random wobble
+          const angle = ((i * 7 + j * 13) % 12) * (Math.PI * 2 / 12);
+          nx = Math.cos(angle);
+          ny = Math.sin(angle);
+        }
+        const overlap = (minDist - d) / 2 + 0.5;
+        // Only push a player if it's still moving (not arrived at target)
+        const aMoving = Math.sqrt((a.tx - a.x) ** 2 + (a.ty - a.y) ** 2) > 3;
+        const bMoving = Math.sqrt((b.tx - b.x) ** 2 + (b.ty - b.y) ** 2) > 3;
+        if (aMoving || bMoving) {
+          // Push the moving one(s) more
+          if (aMoving) { a.x -= nx * overlap; a.y -= ny * overlap; }
+          if (bMoving) { b.x += nx * overlap; b.y += ny * overlap; }
+        } else {
+          // Both stopped — gentle one-time push, lower index gets priority to stay
+          b.x += nx * overlap * 2;
+          b.y += ny * overlap * 2;
+        }
       }
     }
   }
@@ -742,6 +1377,7 @@ function drawField() {
 
 function drawPlayer(p, color) {
   const hasBall = possession === p;
+  const palette = TEAM_PALETTES[p.side];
 
   // During plan phase, show move radius for selected player
   if (phase === 'plan' && p === selected && p.side === 0) {
@@ -769,13 +1405,11 @@ function drawPlayer(p, color) {
   if (phase === 'plan' && p.side === 0 && p.hasOrder) {
     const dx = p.tx - p.x, dy = p.ty - p.y;
     if (Math.sqrt(dx * dx + dy * dy) > 5) {
-      // Target dot
       ctx.beginPath();
       ctx.arc(p.tx, p.ty, 6, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(255,235,59,0.6)';
       ctx.lineWidth = 2;
       ctx.stroke();
-      // Arrow line
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
       ctx.moveTo(p.x, p.y);
@@ -785,19 +1419,17 @@ function drawPlayer(p, color) {
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    // Show tackle icon
     if (p.tackleTarget) {
       ctx.fillStyle = 'rgba(255,100,100,0.9)';
       ctx.font = 'bold 12px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('T', p.x, p.y - p.radius - 8);
+      ctx.fillText('T', p.x, p.y - p.radius - 12);
     }
   }
 
   // Show planned pass/kick
   if (phase === 'plan' && p.side === 0 && p.plannedPass) {
     const {x: tx, y: ty} = p.plannedPass;
-    // passFirst: line from current pos; dribble-then-pass: line from dribble dest
     const hasDribble = p.hasOrder && (Math.abs(p.tx - p.x) > 5 || Math.abs(p.ty - p.y) > 5);
     const sx = (hasDribble && !p.passFirst) ? p.tx : p.x;
     const sy = (hasDribble && !p.passFirst) ? p.ty : p.y;
@@ -827,32 +1459,35 @@ function drawPlayer(p, color) {
   // "Has order" indicator
   if (phase === 'plan' && p.side === 0 && p.hasOrder) {
     ctx.beginPath();
-    ctx.arc(p.x + p.radius + 3, p.y - p.radius - 3, 4, 0, Math.PI * 2);
+    ctx.arc(p.x + p.radius + 3, p.y - p.radius - 6, 4, 0, Math.PI * 2);
     ctx.fillStyle = '#4CAF50';
     ctx.fill();
   }
 
   // Shadow
   ctx.beginPath();
-  ctx.ellipse(p.x + 2, p.y + 4, p.radius, p.radius * 0.5, 0, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.ellipse(p.x, p.y + 2, 10, 4, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
   ctx.fill();
 
-  // Player body
-  ctx.beginPath();
-  ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
+  // Draw pixel sprite
+  drawPixelPlayer(p, palette);
 
-  // Jersey number
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 11px monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(p.index + 1, p.x, p.y);
+  // Jersey number tooltip on hover or select
+  if (p === hoveredPlayer || p === selected) {
+    const label = '' + (p.index + 1);
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    const tw = ctx.measureText(label).width;
+    const px = p.x, py = p.y - 20;
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.beginPath();
+    ctx.roundRect(px - tw/2 - 4, py - 12, tw + 8, 14, 3);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, px, py);
+  }
 }
 
 function drawBall() {
@@ -953,6 +1588,11 @@ function update() {
     timerFill.style.width = ((PLAY_DURATION - playTimer) / PLAY_DURATION * 100) + '%';
 
     const allPlayers = [...teamA, ...teamB];
+    // Snapshot positions before movement for animation detection
+    for (const p of allPlayers) {
+      p._prevX = p.x;
+      p._prevY = p.y;
+    }
     for (const p of allPlayers) {
       p.tackleCooldown = Math.max(0, p.tackleCooldown - 1);
       movePlayer(p);
@@ -983,6 +1623,13 @@ function update() {
 }
 
 function draw() {
+  // Advance animation
+  animTick++;
+  if (animTick >= ANIM_TICK_RATE) {
+    animTick = 0;
+    animFrame++;
+  }
+
   drawField();
   if (!possession) drawBall();
 
@@ -991,7 +1638,6 @@ function draw() {
   allSorted.sort((a, b) => a.p.y - b.p.y);
   for (const {p, color} of allSorted) {
     drawPlayer(p, color);
-    // Draw ball on top of the carrier immediately after drawing them
     if (possession === p) drawBall();
   }
 
