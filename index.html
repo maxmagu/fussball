@@ -510,9 +510,9 @@ function setKickoffPossession() {
 }
 setKickoffPossession();
 
-function resetAfterGoal() {
-  // Alternate kickoff
-  kickoffSide = 1 - kickoffSide;
+function resetAfterGoal(concedingSide) {
+  // Conceding team always kicks off
+  kickoffSide = concedingSide;
   ball.x = W / 2; ball.y = H / 2;
   ball.vx = 0; ball.vy = 0;
   possession = null;
@@ -1349,14 +1349,14 @@ function updateBall() {
     score[1]++; goalFlash = 60; goalScored = true;
     document.getElementById('score').textContent = `${score[0]} : ${score[1]}`;
     ball.vx = 0; ball.vy = 0;
-    setTimeout(resetAfterGoal, 1200);
+    setTimeout(() => resetAfterGoal(0), 1200); // team B scored, team A (0) kicks off
     return;
   }
   if (ball.x >= W - ball.radius - GOAL_W && ball.y > GOAL_Y && ball.y < GOAL_Y + GOAL_H) {
     score[0]++; goalFlash = 60; goalScored = true;
     document.getElementById('score').textContent = `${score[0]} : ${score[1]}`;
     ball.vx = 0; ball.vy = 0;
-    setTimeout(resetAfterGoal, 1200);
+    setTimeout(() => resetAfterGoal(1), 1200); // team A scored, team B (1) kicks off
     return;
   }
 
@@ -1370,13 +1370,13 @@ function checkGoalInPossession() {
     score[1]++; goalFlash = 60; goalScored = true;
     document.getElementById('score').textContent = `${score[0]} : ${score[1]}`;
     possession = null;
-    setTimeout(resetAfterGoal, 1200);
+    setTimeout(() => resetAfterGoal(0), 1200); // team B scored, team A (0) kicks off
   }
   if (ball.x >= W - GOAL_W - ball.radius && ball.y > GOAL_Y && ball.y < GOAL_Y + GOAL_H) {
     score[0]++; goalFlash = 60; goalScored = true;
     document.getElementById('score').textContent = `${score[0]} : ${score[1]}`;
     possession = null;
-    setTimeout(resetAfterGoal, 1200);
+    setTimeout(() => resetAfterGoal(1), 1200); // team A scored, team B (1) kicks off
   }
 }
 
