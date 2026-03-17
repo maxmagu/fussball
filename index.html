@@ -961,10 +961,12 @@ function scoreActions(p, mood) {
 
   // --- MAKE A RUN: sprint toward goal ---
   if (teamHasBall && !hasBall && (role === 'fwd' || role === 'mid')) {
-    let runScore = 15 + noise();
+    let runScore = 35 + noise();
     if (mood === 'counter' && teamHasBall) runScore += 35;
-    if (mood === 'pressing') runScore += 15;
-    if (role === 'fwd') runScore += 20;
+    if (mood === 'pressing') runScore += 20;
+    if (role === 'fwd') runScore += 25;
+    // Bonus if already in attacking half
+    if (p.x < W / 2) runScore += 15;
     // Run toward a point near their goal
     const runX = 50 + Math.random() * 150;
     const runY = H * 0.2 + Math.random() * H * 0.6;
@@ -983,33 +985,41 @@ function scoreActions(p, mood) {
 
   // --- WITH BALL: dribble / pass / shoot ---
   if (hasBall) {
-    // Shoot if close enough
-    if (p.x < 250) {
+    const opp = nearestOpponent(p.x, p.y);
+
+    // Shoot if in range — high priority, scales with proximity
+    if (p.x < 350) {
       const shotY = H / 2 + (Math.random() - 0.5) * GOAL_H * 0.8;
-      actions.push({ action: 'shoot', score: 80 + noise(), tx: 10, ty: shotY });
+      let shotScore = 70 + noise();
+      shotScore += (350 - p.x) / 3; // up to +116 when right at goal
+      actions.push({ action: 'shoot', score: shotScore, tx: 10, ty: shotY });
     }
 
     // Dribble toward goal
-    const goalX = 50, goalY = H / 2 + (Math.random() - 0.5) * 100;
-    let dribScore = 35 + noise();
+    const goalX = Math.max(30, p.x - MOVE_RADIUS * 0.7);
+    const goalY = H / 2 + (Math.random() - 0.5) * 100;
+    let dribScore = 40 + noise();
     if (mood === 'counter') dribScore += 20;
-    const opp = nearestOpponent(p.x, p.y);
     if (opp.d < 60) dribScore -= 25; // pressure: prefer passing
+    if (opp.d > 120) dribScore += 15; // space ahead: go for it
+    if (role === 'fwd') dribScore += 10;
     actions.push({ action: 'dribble', score: dribScore, tx: goalX, ty: goalY });
 
     // Pass to open teammate
     for (const t of teamB) {
       if (t === p || t.index === 0) continue;
       const td = dist(p, t);
-      if (td < 50 || td > 500) continue; // too close or too far
+      if (td < 50 || td > 500) continue;
       const open = isOpen(t, 80);
-      let passScore = 25 + noise();
-      if (mood === 'possession') passScore += 25;
+      let passScore = 35 + noise();
+      if (mood === 'possession') passScore += 20;
       if (open) passScore += 20;
-      if (t.x < p.x) passScore += 10; // forward pass bonus (team B attacks left)
-      if (opp.d < 60) passScore += 20; // under pressure: pass!
-      // Prefer forwards
+      // Forward pass bonus
+      const forwardGain = (p.x - t.x) / W;
+      if (forwardGain > 0) passScore += forwardGain * 40;
+      if (opp.d < 60) passScore += 25; // under pressure: pass!
       if (aiRole(t) === 'fwd') passScore += 10;
+      if (t.x < 350) passScore += 15; // pass into shooting range
       actions.push({ action: 'pass', score: passScore, tx: t.x, ty: t.y, passTarget: t });
     }
   }
