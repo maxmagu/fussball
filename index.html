@@ -846,6 +846,23 @@ function isOpen(p, radius) {
   return true;
 }
 
+// Distance from point (px,py) to line segment (ax,ay)-(bx,by)
+function pointToSegDist(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.sqrt((px - ax) ** 2 + (py - ay) ** 2);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  return Math.sqrt((px - (ax + t * dx)) ** 2 + (py - (ay + t * dy)) ** 2);
+}
+
+// Check if any team A player is blocking the passing lane
+function isPassLaneClear(from, to, blockRadius = 50) {
+  for (const a of teamA) {
+    if (pointToSegDist(a.x, a.y, from.x, from.y, to.x, to.y) < blockRadius) return false;
+  }
+  return true;
+}
+
 // Nearest team A player to a point
 function nearestOpponent(x, y) {
   let best = null, bestD = Infinity;
@@ -1011,9 +1028,11 @@ function scoreActions(p, mood) {
       const td = dist(p, t);
       if (td < 50 || td > 500) continue;
       const open = isOpen(t, 80);
+      const laneClear = isPassLaneClear(p, t);
       let passScore = 35 + noise();
       if (mood === 'possession') passScore += 20;
       if (open) passScore += 20;
+      if (!laneClear) passScore -= 45; // opponent in the way
       // Forward pass bonus
       const forwardGain = (p.x - t.x) / W;
       if (forwardGain > 0) passScore += forwardGain * 40;
