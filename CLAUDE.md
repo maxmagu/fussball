@@ -4,7 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Fussball Commander — a browser-based turn-based football/soccer game. Pure client-side HTML/CSS/JS with no build step, no dependencies, no package manager.
+Fussball Commander — a browser-based football/soccer game built with TypeScript, Vite, and canvas. This is a tech experiment / feasibility study / demo exploring two core ideas:
+
+1. **Chess meets Soccer** — A turn-based tactical mode where you plan moves, then watch them execute simultaneously. Think chess with 11 pieces per side on a football pitch.
+2. **Live-action coach simulator** — A real-time mode where you're the coach giving live commands (including voice) to your team as the game unfolds.
+
+Both modes share one engine. The project is also an AI playground: hand-coded tactics, natural-language rules translated to code, and a neural net trained via self-play can all compete against each other.
+
+See `docs/PLAN.md` for the full feature development plan.
 
 ## Project Structure
 
@@ -14,7 +21,9 @@ Fussball Commander — a browser-based turn-based football/soccer game. Pure cli
 
 ## Development
 
-Open `index.html` directly in a browser or serve with any static server (`python3 -m http.server`). No build, lint, or test commands exist.
+**Current state (pre-Phase 0):** Open `index.html` directly in a browser. No build step.
+
+**Target (Phase 0+):** TypeScript + Vite. Run `npm run dev` for dev server with HMR. Canvas game engine stays vanilla TS — no React for rendering. React may be added for UI chrome (panels, overlays) in Phase 3-4 if needed.
 
 ## Deployment
 
