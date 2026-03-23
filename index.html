@@ -40,6 +40,16 @@
     position: fixed; bottom: 60px; right: 20px;
     z-index: 10; display: flex; gap: 8px; align-items: center;
   }
+  #ai-mode-label {
+    color: #888; font: 12px monospace; display: flex; align-items: center; gap: 6px;
+  }
+  #ai-mode-select {
+    background: rgba(255,255,255,0.07); color: #ccc; border: 1px solid #555;
+    font: 12px monospace; padding: 7px 10px; border-radius: 6px;
+    cursor: pointer; outline: none;
+  }
+  #ai-mode-select:hover { background: rgba(255,255,255,0.14); }
+  #ai-mode-select option { background: #1a1a2e; color: #ccc; }
   #debug-toggles button {
     background: rgba(255,255,255,0.07); color: #888; border: 1px solid #555;
     font: 12px monospace; padding: 8px 14px; border-radius: 6px;
@@ -66,6 +76,14 @@
 <canvas id="c"></canvas>
 <button id="play-btn">&#9654; PLAY</button>
 <div id="debug-toggles">
+  <label id="ai-mode-label">AI:
+    <select id="ai-mode-select">
+      <option value="heuristic">Heuristic</option>
+      <option value="rules" disabled>Rules (coming soon)</option>
+      <option value="neural" disabled>Neural Net (coming soon)</option>
+      <option value="hybrid" disabled>Hybrid (coming soon)</option>
+    </select>
+  </label>
   <button id="debug-btn">&#9744; debug</button>
   <button id="ai-all-actions-btn">&#9744; all actions</button>
 </div>

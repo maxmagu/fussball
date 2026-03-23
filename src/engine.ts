@@ -88,6 +88,7 @@ export function createGameState(): GameState {
     kickoffSide,
     lastKicker: null,
     lastKickerCooldown: 0,
+    aiMode: 'heuristic',
     aiMood: 'balanced',
     aiPlanReady: false,
     aiShowAllActions: false,

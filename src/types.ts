@@ -48,6 +48,7 @@ export type Direction = 'up' | 'down' | 'left' | 'right';
 export type AnimState = 'idle' | 'run' | 'kick';
 export type AIRole = 'gk' | 'def' | 'mid' | 'fwd';
 export type AIMood = 'pressing' | 'counter' | 'possession' | 'parkbus' | 'balanced';
+export type AIMode = 'heuristic' | 'rules' | 'neural' | 'hybrid';
 
 export interface GameState {
   teamA: Player[];
@@ -68,6 +69,7 @@ export interface GameState {
   lastKickerCooldown: number;
 
   // AI state
+  aiMode: AIMode;
   aiMood: AIMood;
   aiPlanReady: boolean;
   aiShowAllActions: boolean;

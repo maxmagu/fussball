@@ -1,6 +1,6 @@
 # Fussball Commander — Feature Development Plan
 
-**Status**: Draft v1 — 2026-03-20
+**Status**: In progress — updated 2026-03-23
 **Scope**: 8 phases (0-7), iterative over days/weeks
 
 ---
@@ -71,6 +71,13 @@ All decisions made during the grill-me session on 2026-03-20.
 | 45 | Extract sprites? | Yes. Move ~500 lines of pixel array data from `makeSprites()` to `sprites.js` during Phase 0. Keeps renderer clean and makes future visual upgrades a data-file swap. |
 | 46 | Futsal vs outdoor MVP? | Start with 11v11 full-sized field but futsal rules (walls, no offside, no corners/throw-ins). Make rules configurable from day one so outdoor rules are a toggle, not a rewrite. |
 | 47 | TypeScript + Vite? | Yes, at Phase 0. TS for type safety on complex state/configs. Vite for dev server + HMR + TS compilation. React: evaluate at Phase 3-4 for UI chrome only. Canvas rendering stays vanilla TS. |
+| 48 | LLM AI mode server tech? | Vite dev proxy for dev, standalone for prod. `npm run dev` and everything works. |
+| 49 | LLM coordinate system? | Normalized 0-1. LLM reasons better with unit ranges than pixel values. Convert on the boundary. |
+| 50 | LLM conversation history? | Stateless. Fresh call each round. Game state encodes everything needed. |
+| 51 | LLM error handling? | Fall back to heuristic with visible warning. Per-player fallback for partial responses. |
+| 52 | LLM timing? | Fire on every transition to plan phase. Play button disabled until response. LLM plans in parallel with human planning. |
+| 53 | LLM structured output? | Prompt-only JSON (no tool use). Fallback to heuristic on parse failure. |
+| 54 | LLM model selection? | Configurable via `LLM_MODEL` env var. Default `claude-sonnet-4-6`. |
 
 ---
 
@@ -95,12 +102,35 @@ All decisions made during the grill-me session on 2026-03-20.
 17. **UX: Pass danger viz** — Accuracy cone shown during pass/shot planning, informed by stats + pressure
 18. **UX: Remove click-to-move** — Move orders are drag-only. Click reserved for select + tackle.
 19. **UX: Round replay** — Replay button re-runs last round at half speed from stored snapshot
+20. **LLM AI mode** — LLM steers the opponent team. API call fires during plan phase (parallel with human planning). Prompt loaded from markdown file. Response includes per-player positions, actions, and reasoning.
 
 ---
 
-## Phase 0: Engine Extraction (Foundation)
+## Progress
+
+| Phase | Name | Status |
+|-------|------|--------|
+| 0 | Engine Extraction | ✅ Done. UX improvements & headless validation pending. |
+| 0.5 | LLM AI Mode (Story 20) | Not started |
+| 1 | Player Stats, Accuracy & Soccer Rules | Not started |
+| 2 | Game Mode Toggle (turn-based ↔ real-time) | Not started |
+| 3 | Rule Modifier System | Not started |
+| 4 | Server API + NL Translation | Not started |
+| 5 | Voice Commands | Not started |
+| 6 | Neural Net Training + Inference | Not started |
+| 7 | AI Mode Switcher | Partial — dropdown UI + AIMode type done, implementations depend on Phases 3 & 6 |
+
+---
+
+## Phase 0: Engine Extraction (Foundation) ✅ DONE
 
 **Goal**: Split monolith into typed modules. Set up Vite + TypeScript. Everything still works identically in the browser. Headless mode becomes possible.
+
+**Completed 2026-03-23**: Monolithic `index.html` extracted into `src/` modules (`engine.ts`, `ai.ts`, `renderer.ts`, `sprites.ts`, `ui.ts`, `types.ts`, `main.ts`). Vite + TypeScript build working. Game plays identically in browser.
+
+**Partially done**: AI mode switcher UI added (dropdown next to debug buttons) with `AIMode` type (`heuristic | rules | neural | hybrid`). Heuristic active, others stubbed as "coming soon". This was pulled forward from Phase 7 since the UI is trivial and sets up the architecture for future modes.
+
+**Not yet done**: UX improvements bundled with Phase 0 (tooltips, undo, order counter, pass danger viz, drag-only moves, round replay). Headless mode validation.
 
 ### Setup
 
@@ -214,6 +244,116 @@ These are interaction fixes to apply during the refactor:
 ### Estimated scope
 
 ~800 lines to reorganize across files + UX improvements above.
+
+---
+
+## Phase 0.5: LLM AI Mode (Story 20)
+
+**Goal**: Add an LLM-powered AI mode where Claude Sonnet steers team B. The LLM plans in parallel with the human — API call fires as soon as plan phase starts, play button disabled until response arrives.
+
+### Architecture
+
+- **Dev**: Vite dev server proxy handles `POST /api/ai-plan`. No separate server process.
+- **Prod**: Standalone server on Hetzner VPS (reused when Phase 4 adds NL translation).
+- **Prompt**: System prompt loaded from `src/prompts/ai-plan.md`. User message is serialized game state JSON.
+- **Stateless**: Each round is an independent API call. No conversation history.
+
+### API call flow
+
+1. Plan phase begins → client serializes game state → `POST /api/ai-plan`
+2. Vite proxy reads `src/prompts/ai-plan.md` as system prompt
+3. Proxy sends system prompt + game state JSON to Claude Sonnet API
+4. Response parsed → orders applied to team B players
+5. `aiPlanReady = true` → play button enabled
+
+### Game state sent to LLM (normalized 0-1)
+
+```json
+{
+  "score": [0, 1],
+  "round": 5,
+  "ball": { "x": 0.45, "y": 0.52 },
+  "possession": { "team": "B", "index": 10 },
+  "teamB": [
+    { "index": 0, "role": "gk", "x": 0.92, "y": 0.50 },
+    { "index": 1, "role": "def", "x": 0.80, "y": 0.15 }
+  ],
+  "teamA": [
+    { "index": 0, "role": "gk", "x": 0.08, "y": 0.50 }
+  ]
+}
+```
+
+### LLM response schema
+
+```json
+{
+  "reasoning": "Dropping deep to absorb pressure, looking for counter.",
+  "orders": [
+    {
+      "index": 0,
+      "reasoning": "Tracking ball position",
+      "actions": [{ "type": "move", "x": 0.92, "y": 0.48 }]
+    },
+    {
+      "index": 9,
+      "reasoning": "Dribbling past defender then passing to open winger",
+      "actions": [
+        { "type": "move", "x": 0.35, "y": 0.45 },
+        { "type": "pass", "x": 0.20, "y": 0.30 }
+      ]
+    },
+    {
+      "index": 10,
+      "reasoning": "Making a run toward goal for a shot",
+      "actions": [
+        { "type": "move", "x": 0.15, "y": 0.50 },
+        { "type": "shoot", "x": 0.0, "y": 0.50 }
+      ]
+    }
+  ]
+}
+```
+
+**Action types**: `move` (move/dribble to position), `pass` (pass ball to position), `shoot` (shoot at goal). Max 2 actions per player. Array order = execution order (e.g., `[move, pass]` = dribble first then pass). Non-ball-carriers have a single `[move]`. Move radius (120px) explained in prompt, clamped client-side.
+
+### Error handling
+
+- API failure / timeout → fall back to heuristic AI with visible warning
+- Malformed JSON → fall back to heuristic
+- Partial response (valid orders for some players, garbage for others) → heuristic fills in the gaps
+- Per-player: out-of-range coordinates clamped, missing players get heuristic orders
+
+### Reasoning display
+
+- Global reasoning + per-player reasoning stored on `GameState`
+- Visible in debug mode (existing overlay), hover a player to see why the LLM moved them
+
+### Configuration
+
+`.env` file (gitignored):
+```
+ANTHROPIC_API_KEY=sk-ant-...
+LLM_MODEL=claude-sonnet-4-6
+```
+
+### Files
+
+```
+.env                        — API key + model config (gitignored)
+src/prompts/ai-plan.md      — System prompt (game rules, output schema, constraints)
+vite.config.ts              — Add dev proxy plugin for /api/ai-plan
+src/ai.ts                   — Add llm mode to dispatcher
+src/ai-llm.ts               — State serializer, response parser, API call
+src/types.ts                — Add 'llm' to AIMode, add LLM state fields
+```
+
+### Validation
+
+- Select "LLM" mode → plan phase fires API call, play button shows "AI thinking..."
+- LLM response applies valid moves to team B, visible in debug overlay
+- Kill network → warning shown, heuristic takes over seamlessly
+- Reasoning visible per-player in debug mode on hover
 
 ---
 
@@ -744,22 +884,25 @@ With player stats + soccer rules, the input space is ~560 features, net is ~170K
 
 ---
 
-## Phase 7: AI Mode Switcher (Story 7)
+## Phase 7: AI Mode Switcher (Story 7) — partially started
+
 **Goal**: Toggle between AI modes from the UI.
+
+**Started in Phase 0**: `AIMode` type and dropdown UI added. Heuristic mode active, others stubbed with fallback to heuristic. Full implementation depends on Phases 3 (rules), 6 (neural net).
 
 ### Modes
 
-| Mode | Description | How it works |
-|------|-------------|-------------|
-| `baseline` | Current hand-coded AI | `scoreActions()` only |
-| `custom-rules` | User's rule modifiers | `scoreActions()` + active rule modifiers |
-| `neural-net` | Trained net — completely independent brain | Net outputs raw `(tx, ty)` per player + pass/shoot decisions. Bypasses `scoreActions()` entirely. |
-| `hybrid` | Net proposes, rules adjust | Net outputs positions, then rule modifiers post-adjust targets (e.g., "defense forward" shifts net's defender targets forward) |
+| Mode | Code name | Description | How it works |
+|------|-----------|-------------|-------------|
+| Heuristic | `heuristic` | Current hand-coded AI | `scoreActions()` only |
+| Rules | `rules` | User's rule modifiers | `scoreActions()` + active rule modifiers |
+| LLM | `llm` | Claude Sonnet steers team B | API call each round, raw positions + actions. Bypasses `scoreActions()`. See Phase 0.5. |
+| Neural Net | `neural` | Trained net — independent brain | Net outputs raw `(tx, ty)` per player + pass/shoot decisions. Bypasses `scoreActions()` entirely. |
+| Hybrid | `hybrid` | Net proposes, rules adjust | Net outputs positions, then rule modifiers post-adjust targets |
 
 ### UI
 
-- Button group next to debug toggles: `[BASE] [RULES] [NET] [HYBRID]`
-- Active mode highlighted (like existing debug button `.active` style)
+- Dropdown select next to debug toggles (already implemented in Phase 0)
 - Mode applies to team B (AI team). Team A uses rules if enabled (Phase 2).
 - For AI vs AI testing: can set mode independently for each team
 
@@ -805,25 +948,29 @@ With player stats + soccer rules, the input space is ~560 features, net is ~170K
 
 ```
 index.html                — Game shell (<script type="module" src="/src/main.ts">)
+.env                      — API keys + config (gitignored)
 package.json
 tsconfig.json
-vite.config.ts
+vite.config.ts            — Includes dev proxy plugin for /api/ai-plan
 src/
   main.ts                 — Entry point, wires everything together
   types.ts                — Shared interfaces: GameState, Player, Ball, RulesConfig, etc.
   engine.ts               — Pure game engine (headless-capable, zero DOM)
-  ai.ts                   — AI planning + scoring
+  ai.ts                   — AI mode dispatcher + heuristic planning
+  ai-llm.ts               — LLM mode: state serializer, response parser, API call
   renderer.ts             — Canvas rendering + debug overlays
   sprites.ts              — Pixel sprite data (extracted from makeSprites)
   ui.ts                   — DOM event handlers, input, UI panels
   voice.ts                — Voice recognition + command parsing
   rules.ts                — Rule modifier system (client-side)
   neural.ts               — Neural net inference (TFJS model loading + state encoding)
+  prompts/
+    ai-plan.md            — LLM system prompt (game rules, output schema, constraints)
 public/
   models/                 — Trained TFJS models (model.json + weights)
   rules/                  — Pre-built rule modifier JSONs
   stadium-sound.mp3
-server/                   — Node.js API server (separate process)
+server/                   — Node.js API server (standalone, for prod)
   index.ts
   routes/translate.ts
   routes/rules.ts

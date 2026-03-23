@@ -482,3 +482,18 @@ export function planAI(state: GameState): void {
 
   state.aiPlanReady = true;
 }
+
+// --- AI mode dispatcher ---
+export function planAIForMode(state: GameState): void {
+  switch (state.aiMode) {
+    case 'rules':
+    case 'neural':
+    case 'hybrid':
+      // Not yet implemented — fall back to heuristic
+      console.warn(`AI mode "${state.aiMode}" not yet implemented, using heuristic`);
+      return planAI(state);
+    case 'heuristic':
+    default:
+      return planAI(state);
+  }
+}

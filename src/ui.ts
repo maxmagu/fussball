@@ -3,7 +3,9 @@
 import type { Player, GameState } from './types';
 import { W, H, MOVE_RADIUS, GOAL_Y, GOAL_H, PLAY_DURATION } from './types';
 import { createGameState, resetAfterGoal, endRound, tick, autoplanGK, prepareRound, kickBall } from './engine';
-import { planAI } from './ai';
+import { planAIForMode } from './ai';
+import type { AIMode } from './types';
+
 import { createRenderer, type DragState } from './renderer';
 
 export function initGame(canvas: HTMLCanvasElement): void {
@@ -19,8 +21,16 @@ export function initGame(canvas: HTMLCanvasElement): void {
   const allActionsBtn = document.getElementById('ai-all-actions-btn') as HTMLButtonElement;
   const scoreEl = document.getElementById('score')!;
 
+  const aiModeSelect = document.getElementById('ai-mode-select') as HTMLSelectElement;
+
   let aiDebugMode = false;
   let hoveredPlayer: Player | null = null;
+
+  // --- AI mode selector ---
+  aiModeSelect.value = state.aiMode;
+  aiModeSelect.addEventListener('change', () => {
+    state.aiMode = aiModeSelect.value as AIMode;
+  });
 
   // Drag state
   const drag: DragState = {
@@ -256,7 +266,7 @@ export function initGame(canvas: HTMLCanvasElement): void {
     if (state.phase === 'preview') { executePlay(); return; }
     if (state.phase !== 'plan') return;
     prepareRound(state);
-    planAI(state);
+    planAIForMode(state);
     if (aiDebugMode) {
       state.phase = 'preview';
       allActionsBtn.style.display = 'inline-block';
