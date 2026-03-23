@@ -1,11 +1,19 @@
 // --- Pure game engine (zero DOM references) ---
 
-import type { Player, Ball, GameState, PlannedPass } from './types';
+import type { Player, Ball, GameState, PlannedPass, PlayerStats, AIRole, SetPiece } from './types';
 import {
   W, H, GOAL_W, GOAL_H, GOAL_Y, PLAY_DURATION, MOVE_RADIUS,
   GAME_SPEED, TACKLE_RANGE, TACKLE_SUCCESS, PICKUP_RANGE,
-  DRIBBLE_SPEED_PENALTY, BALL_SPEED_MULT, FORMATION_BASE,
+  DRIBBLE_SPEED_PENALTY, BALL_SPEED_MULT, FORMATION_BASE, STAT_TEMPLATES, RULES_FUTSAL,
 } from './types';
+
+// Role helper (duplicated here to avoid circular dep with ai.ts)
+function roleForIndex(i: number): AIRole {
+  if (i === 0) return 'gk';
+  if (i <= 4) return 'def';
+  if (i <= 8) return 'mid';
+  return 'fwd';
+}
 
 // --- Utility ---
 export function dist(a: { x: number; y: number }, b: { x: number; y: number }): number {
@@ -15,6 +23,23 @@ export function dist(a: { x: number; y: number }, b: { x: number; y: number }): 
 
 export function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
+}
+
+// --- Stat generation with ±10% variation ---
+function generateStats(role: AIRole): PlayerStats {
+  const base = STAT_TEMPLATES[role];
+  const vary = (v: number) => v * (0.9 + Math.random() * 0.2);
+  return {
+    speed: vary(base.speed),
+    acceleration: vary(base.acceleration),
+    stamina: vary(base.stamina),
+    staminaRecovery: vary(base.staminaRecovery),
+    passAccuracy: Math.min(1, vary(base.passAccuracy)),
+    shotPower: vary(base.shotPower),
+    shotAccuracy: Math.min(1, vary(base.shotAccuracy)),
+    tackling: Math.min(1, vary(base.tackling)),
+    foulRisk: Math.min(1, vary(base.foulRisk)),
+  };
 }
 
 // --- Team creation ---
@@ -43,10 +68,13 @@ export function createTeam(side: 0 | 1, kickoffSide: number): Player[] {
       }
     }
 
+    const role = roleForIndex(i);
+    const stats = generateStats(role);
+
     return {
       x, y, tx: x, ty: y,
       homeX: x, homeY: y,
-      speed: i === 0 ? 2.5 : 3.0 + Math.random() * 0.5,
+      speed: stats.speed,
       radius: 14,
       side,
       index: i,
@@ -55,6 +83,35 @@ export function createTeam(side: 0 | 1, kickoffSide: number): Player[] {
       hasOrder: false,
       plannedPass: null,
       passFirst: false,
+      stats,
+      currentStamina: stats.stamina,
+      currentSpeed: stats.speed,
+      isSprinting: false,
+    } as Player;
+  });
+}
+
+// --- Bench creation (3 subs: 1 DEF, 1 MID, 1 FWD) ---
+function createBench(side: 0 | 1): Player[] {
+  const roles: AIRole[] = ['def', 'mid', 'fwd'];
+  return roles.map((role, i) => {
+    const stats = generateStats(role);
+    return {
+      x: -100, y: -100, tx: -100, ty: -100,
+      homeX: -100, homeY: -100,
+      speed: stats.speed,
+      radius: 14,
+      side,
+      index: 11 + i,
+      tackleCooldown: 0,
+      tackleTarget: null,
+      hasOrder: false,
+      plannedPass: null,
+      passFirst: false,
+      stats,
+      currentStamina: stats.stamina, // bench players start fresh
+      currentSpeed: stats.speed,
+      isSprinting: false,
     } as Player;
   });
 }
@@ -94,6 +151,25 @@ export function createGameState(): GameState {
     aiShowAllActions: false,
     aiLastPlan: [],
     aiHoveredPlayer: null,
+    llmThinking: false,
+    llmError: null,
+    llmReasoning: null,
+    llmPlayerReasons: new Map(),
+
+    // Soccer rules
+    rules: RULES_FUTSAL,
+    half: 1,
+    roundsPerHalf: 30,
+    clockMinutes: 0,
+    subsRemaining: [3, 3],
+    bench: [createBench(0), createBench(1)],
+    setpiece: null,
+    penalty: null,
+    foulCount: [0, 0],
+    shotCount: [0, 0],
+    passCount: [0, 0],
+    possessionCount: [0, 0],
+    halfTimeShown: false,
   };
 
   setKickoffPossession(state);
@@ -109,17 +185,71 @@ export function setKickoffPossession(state: GameState): void {
   state.ball.vy = 0;
 }
 
+// --- Accuracy physics ---
+function applyAccuracy(
+  targetX: number, targetY: number,
+  fromX: number, fromY: number,
+  accuracy: number, pressure: number, stamina: number, maxStamina: number
+): { x: number; y: number } {
+  // Base cone: ±(1 - accuracy) * 15°
+  let maxAngle = (1 - accuracy) * 15 * (Math.PI / 180);
+  // Pressure: nearby opponents widen cone
+  maxAngle *= (1 + pressure * 0.3);
+  // Fatigue: low stamina widens cone
+  if (stamina < maxStamina * 0.5) {
+    maxAngle *= (1 + (maxStamina * 0.5 - stamina) / (maxStamina * 0.5) * 0.5);
+  }
+  const angle = Math.atan2(targetY - fromY, targetX - fromX);
+  const deviation = (Math.random() * 2 - 1) * maxAngle;
+  const dd = Math.sqrt((targetX - fromX) ** 2 + (targetY - fromY) ** 2);
+  return {
+    x: fromX + Math.cos(angle + deviation) * dd,
+    y: fromY + Math.sin(angle + deviation) * dd,
+  };
+}
+
+function countNearbyOpponents(x: number, y: number, opponents: Player[], range: number): number {
+  let count = 0;
+  for (const opp of opponents) {
+    if (dist({ x, y }, opp) < range) count++;
+  }
+  return count;
+}
+
 // --- Ball kicking ---
 export function kickBall(state: GameState, targetX: number, targetY: number, power: number, isShot = false): void {
   const { ball } = state;
   const dx = targetX - ball.x, dy = targetY - ball.y;
   const dd = Math.sqrt(dx * dx + dy * dy);
   if (dd < 1) return;
-  ball.vx = (dx / dd) * power * BALL_SPEED_MULT;
-  ball.vy = (dy / dd) * power * BALL_SPEED_MULT;
-  ball.x += (dx / dd) * 20;
-  ball.y += (dy / dd) * 20;
-  ball.friction = isShot ? 0.94 : 0.98;
+
+  // Apply accuracy deviation if kicker has stats
+  let finalX = targetX, finalY = targetY;
+  if (state.possession && state.possession.stats) {
+    const kicker = state.possession;
+    const accuracy = isShot ? kicker.stats.shotAccuracy : kicker.stats.passAccuracy;
+    const opponents = kicker.side === 0 ? state.teamB : state.teamA;
+    const pressure = countNearbyOpponents(kicker.x, kicker.y, opponents, 60);
+    const adjusted = applyAccuracy(targetX, targetY, ball.x, ball.y, accuracy, pressure, kicker.currentStamina, kicker.stats.stamina);
+    finalX = adjusted.x;
+    finalY = adjusted.y;
+  }
+
+  const fdx = finalX - ball.x, fdy = finalY - ball.y;
+  const fdd = Math.sqrt(fdx * fdx + fdy * fdy);
+  if (fdd < 1) return;
+
+  // Use player's shot power if available
+  let effectivePower = power;
+  if (isShot && state.possession && state.possession.stats) {
+    effectivePower = Math.max(power, state.possession.stats.shotPower);
+  }
+
+  ball.vx = (fdx / fdd) * effectivePower * BALL_SPEED_MULT;
+  ball.vy = (fdy / fdd) * effectivePower * BALL_SPEED_MULT;
+  ball.x += (fdx / fdd) * 20;
+  ball.y += (fdy / fdd) * 20;
+  ball.friction = isShot ? 0.97 : 0.98;
   state.lastKicker = state.possession;
   state.lastKickerCooldown = 40;
   state.possession = null;
@@ -195,18 +325,43 @@ function movePlayer(p: Player, state: GameState): void {
   p._moving = false;
   p._kicking = false;
   if (d > 2) {
-    let spd = p.speed * GAME_SPEED;
+    // Determine if sprinting: moving beyond 60% of MOVE_RADIUS from start
+    const fromStart = Math.sqrt(((p._startX ?? p.x) - p.tx) ** 2 + ((p._startY ?? p.y) - p.ty) ** 2);
+    p.isSprinting = fromStart > MOVE_RADIUS * 0.6;
+
+    // Stamina: deplete when sprinting, recover when not
+    if (p.isSprinting) {
+      p.currentStamina = Math.max(0, p.currentStamina - 1);
+    } else {
+      p.currentStamina = Math.min(p.stats.stamina, p.currentStamina + p.stats.staminaRecovery);
+    }
+
+    // Compute effective speed
+    let spd = p.isSprinting ? p.stats.speed : p.stats.speed * 0.6;
+    // Fatigue: below 30 stamina, speed degrades proportionally
+    if (p.currentStamina < 30) {
+      spd *= 0.5 + (p.currentStamina / 30) * 0.5;
+    }
+    p.currentSpeed = spd;
+    spd *= GAME_SPEED;
     if (state.possession === p) spd *= DRIBBLE_SPEED_PENALTY;
+
     p.x += (dx / d) * spd;
     p.y += (dy / d) * spd;
     p._moving = true;
-  } else if (state.possession === p && p.plannedPass) {
-    p._kicking = true;
-    const pp = p.plannedPass;
-    const passDist = Math.sqrt((pp.x - p.x) ** 2 + (pp.y - p.y) ** 2);
-    const power = pp.isShot ? Math.max(20, passDist / 4) : Math.max(6, passDist / 8);
-    kickBall(state, pp.x, pp.y, power, pp.isShot);
-    p.plannedPass = null;
+  } else {
+    // Standing still: recover stamina
+    p.isSprinting = false;
+    p.currentStamina = Math.min(p.stats.stamina, p.currentStamina + p.stats.staminaRecovery);
+
+    if (state.possession === p && p.plannedPass) {
+      p._kicking = true;
+      const pp = p.plannedPass;
+      const passDist = Math.sqrt((pp.x - p.x) ** 2 + (pp.y - p.y) ** 2);
+      const power = pp.isShot ? Math.max(20, passDist / 4) : Math.max(6, passDist / 8);
+      kickBall(state, pp.x, pp.y, power, pp.isShot);
+      p.plannedPass = null;
+    }
   }
   p.x = clamp(p.x, p.radius, W - p.radius);
   p.y = clamp(p.y, p.radius, H - p.radius);
@@ -290,7 +445,8 @@ function handlePossession(allPlayers: Player[], state: GameState): void {
       const isDirectedTackle = p.tackleTarget === state.possession;
       const range = isDirectedTackle ? TACKLE_RANGE * 1.5 : TACKLE_RANGE;
       if (dp < range && (isDirectedTackle || state.tackleCooldown <= 0)) {
-        const successRate = isDirectedTackle ? 0.95 : TACKLE_SUCCESS;
+        const baseRate = p.stats ? p.stats.tackling : TACKLE_SUCCESS;
+        const successRate = isDirectedTackle ? Math.min(0.95, baseRate + 0.3) : baseRate;
         p.tackleCooldown = 15;
         if (Math.random() < successRate) {
           const victim = state.possession;
@@ -299,11 +455,18 @@ function handlePossession(allPlayers: Player[], state: GameState): void {
           p.tackleTarget = null;
           victim.tackleCooldown = 120;
         } else {
+          // Foul check on failed tackle
+          const foulChance = p.stats ? p.stats.foulRisk : 0.15;
+          if (Math.random() < foulChance) {
+            // Foul! For now just extra cooldown (full foul system in Phase 1d)
+            p.tackleCooldown = 60;
+          } else {
+            p.tackleCooldown = 30;
+          }
           const dx2 = p.x - state.possession.x, dy2 = p.y - state.possession.y;
           const dd = Math.sqrt(dx2 * dx2 + dy2 * dy2) || 1;
           p.x += (dx2 / dd) * 8;
           p.y += (dy2 / dd) * 8;
-          p.tackleCooldown = 30;
           p.tackleTarget = null;
         }
       }
@@ -383,13 +546,105 @@ export function resetAfterGoal(state: GameState, concedingSide: 0 | 1): void {
   state.aiPlanReady = false;
 }
 
+// --- Update cosmetic clock ---
+export function updateClock(state: GameState): void {
+  const roundInHalf = state.half === 1 ? state.round : state.round - state.roundsPerHalf;
+  state.clockMinutes = Math.floor((roundInHalf / state.roundsPerHalf) * 45) + (state.half - 1) * 45;
+}
+
+// --- Track possession stat ---
+export function trackPossession(state: GameState): void {
+  if (state.possession) {
+    state.possessionCount[state.possession.side]++;
+  }
+}
+
+// --- Check for half-time ---
+export function isHalfTime(state: GameState): boolean {
+  return state.rules.halves && state.half === 1 && state.round > state.roundsPerHalf && !state.halfTimeShown;
+}
+
+// --- Check for full-time ---
+export function isFullTime(state: GameState): boolean {
+  return state.round > state.roundsPerHalf * 2;
+}
+
+// --- Switch sides at half-time ---
+export function switchSides(state: GameState): void {
+  state.half = 2;
+  state.halfTimeShown = true;
+  state.kickoffSide = 1; // Team B kicks off second half
+
+  // Mirror all positions
+  for (const p of [...state.teamA, ...state.teamB]) {
+    p.x = W - p.x;
+    p.y = p.y; // y stays same
+    p.tx = W - p.tx;
+    p.homeX = W - p.homeX;
+  }
+
+  // Reset ball to center
+  state.ball.x = W / 2;
+  state.ball.y = H / 2;
+  state.ball.vx = 0;
+  state.ball.vy = 0;
+  state.possession = null;
+  state.passTarget = null;
+
+  // Recreate teams from formation
+  state.teamA = createTeam(0, state.kickoffSide);
+  state.teamB = createTeam(1, state.kickoffSide);
+  // Note: stats are regenerated — in a real game you'd preserve them
+  // For now this is acceptable since it's a new half
+
+  setKickoffPossession(state);
+  state.phase = 'halftime';
+}
+
+// --- Substitution ---
+export function substitutePlayer(state: GameState, side: 0 | 1, fieldIndex: number, benchIndex: number): boolean {
+  if (state.subsRemaining[side] <= 0) return false;
+  const team = side === 0 ? state.teamA : state.teamB;
+  const bench = state.bench[side];
+  if (fieldIndex < 0 || fieldIndex >= team.length) return false;
+  if (benchIndex < 0 || benchIndex >= bench.length) return false;
+
+  const fieldPlayer = team[fieldIndex];
+  const benchPlayer = bench[benchIndex];
+
+  // Swap positions
+  benchPlayer.x = fieldPlayer.x;
+  benchPlayer.y = fieldPlayer.y;
+  benchPlayer.tx = fieldPlayer.x;
+  benchPlayer.ty = fieldPlayer.y;
+  benchPlayer.homeX = fieldPlayer.homeX;
+  benchPlayer.homeY = fieldPlayer.homeY;
+  benchPlayer.index = fieldPlayer.index;
+  benchPlayer.side = side;
+
+  // Put field player on bench
+  fieldPlayer.x = -100;
+  fieldPlayer.y = -100;
+
+  team[fieldIndex] = benchPlayer;
+  bench[benchIndex] = fieldPlayer;
+  state.subsRemaining[side]--;
+  return true;
+}
+
 // --- End round ---
 export function endRound(state: GameState): void {
+  // Track possession for the round
+  trackPossession(state);
+
   state.phase = 'plan';
   state.round++;
   state.selected = null;
   state.aiPlanReady = false;
   state.aiHoveredPlayer = null;
+
+  // Update cosmetic clock
+  updateClock(state);
 
   for (const p of state.teamA) {
     p.hasOrder = false;
@@ -405,6 +660,85 @@ export function endRound(state: GameState): void {
     p.tackleTarget = null;
     p.plannedPass = null;
   }
+}
+
+// --- Deep clone game state for replay ---
+export function cloneState(state: GameState): GameState {
+  const clonePlayer = (p: Player): Player => ({ ...p, tackleTarget: null, plannedPass: p.plannedPass ? { ...p.plannedPass } : null });
+  const teamA = state.teamA.map(clonePlayer);
+  const teamB = state.teamB.map(clonePlayer);
+  const ball: Ball = { ...state.ball };
+
+  // Re-link possession/passTarget/selected to cloned players
+  let possession: Player | null = null;
+  let passTarget: Player | null = null;
+  let lastKicker: Player | null = null;
+  if (state.possession) {
+    const team = state.possession.side === 0 ? teamA : teamB;
+    possession = team[state.possession.index];
+  }
+  if (state.passTarget) {
+    const team = state.passTarget.side === 0 ? teamA : teamB;
+    passTarget = team[state.passTarget.index];
+  }
+  if (state.lastKicker) {
+    const team = state.lastKicker.side === 0 ? teamA : teamB;
+    lastKicker = team[state.lastKicker.index];
+  }
+
+  // Re-link tackle targets
+  for (let i = 0; i < state.teamA.length; i++) {
+    if (state.teamA[i].tackleTarget) {
+      const tt = state.teamA[i].tackleTarget!;
+      const tTeam = tt.side === 0 ? teamA : teamB;
+      teamA[i].tackleTarget = tTeam[tt.index];
+    }
+  }
+  for (let i = 0; i < state.teamB.length; i++) {
+    if (state.teamB[i].tackleTarget) {
+      const tt = state.teamB[i].tackleTarget!;
+      const tTeam = tt.side === 0 ? teamA : teamB;
+      teamB[i].tackleTarget = tTeam[tt.index];
+    }
+  }
+
+  return {
+    teamA, teamB, ball, possession, passTarget,
+    selected: null,
+    phase: state.phase,
+    round: state.round,
+    score: [state.score[0], state.score[1]],
+    playTimer: state.playTimer,
+    tackleCooldown: state.tackleCooldown,
+    goalFlash: state.goalFlash,
+    goalScored: state.goalScored,
+    kickoffSide: state.kickoffSide,
+    lastKicker,
+    lastKickerCooldown: state.lastKickerCooldown,
+    aiMode: state.aiMode,
+    aiMood: state.aiMood,
+    aiPlanReady: state.aiPlanReady,
+    aiShowAllActions: false,
+    aiLastPlan: state.aiLastPlan,
+    aiHoveredPlayer: null,
+    llmThinking: false,
+    llmError: null,
+    llmReasoning: null,
+    llmPlayerReasons: new Map(),
+    rules: state.rules,
+    half: state.half,
+    roundsPerHalf: state.roundsPerHalf,
+    clockMinutes: state.clockMinutes,
+    subsRemaining: [state.subsRemaining[0], state.subsRemaining[1]],
+    bench: state.bench, // shared ref fine for replay
+    setpiece: state.setpiece ? { ...state.setpiece } : null,
+    penalty: state.penalty ? { ...state.penalty } : null,
+    foulCount: [state.foulCount[0], state.foulCount[1]],
+    shotCount: [state.shotCount[0], state.shotCount[1]],
+    passCount: [state.passCount[0], state.passCount[1]],
+    possessionCount: [state.possessionCount[0], state.possessionCount[1]],
+    halfTimeShown: state.halfTimeShown,
+  };
 }
 
 // --- Main tick (play phase simulation) ---

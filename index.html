@@ -28,14 +28,32 @@
     text-align: left; line-height: 1.7; display: none;
     background: rgba(20, 20, 40, 0.95); padding: 10px 14px; border-radius: 6px; border: 1px solid #444;
   }
-  #play-btn {
+  #play-area {
     position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
-    z-index: 10; background: #4CAF50; color: #fff; border: none;
+    z-index: 10; display: flex; align-items: center; gap: 12px;
+  }
+  #play-btn {
+    background: #4CAF50; color: #fff; border: none;
     font: bold 20px monospace; padding: 12px 40px; border-radius: 8px;
     cursor: pointer; transition: all 0.2s;
   }
-  #play-btn:hover { background: #66BB6A; transform: translateX(-50%) scale(1.05); }
-  #play-btn:disabled { background: #555; cursor: not-allowed; transform: translateX(-50%); }
+  #play-btn:hover { background: #66BB6A; transform: scale(1.05); }
+  #play-btn:disabled { background: #555; cursor: not-allowed; transform: none; }
+  #clear-all-btn {
+    background: rgba(255,255,255,0.1); color: #aaa; border: 1px solid #555;
+    font: 13px monospace; padding: 8px 14px; border-radius: 6px;
+    cursor: pointer; transition: all 0.2s;
+  }
+  #clear-all-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  #replay-btn {
+    background: rgba(100,180,255,0.2); color: #8cf; border: 1px solid #58a;
+    font: 13px monospace; padding: 8px 14px; border-radius: 6px;
+    cursor: pointer; transition: all 0.2s;
+  }
+  #replay-btn:hover { background: rgba(100,180,255,0.35); }
+  #order-counter {
+    color: #aaa; font: 13px monospace; white-space: nowrap;
+  }
   #debug-toggles {
     position: fixed; bottom: 60px; right: 20px;
     z-index: 10; display: flex; gap: 8px; align-items: center;
@@ -74,11 +92,17 @@
 <div id="round-info">Round 1 — Plan your moves</div>
 <div id="timer-bar"><div id="timer-fill"></div></div>
 <canvas id="c"></canvas>
-<button id="play-btn">&#9654; PLAY</button>
+<div id="play-area">
+  <span id="order-counter"></span>
+  <button id="clear-all-btn">Clear all</button>
+  <button id="play-btn">&#9654; PLAY</button>
+  <button id="replay-btn" style="display:none">&#9654;&#9654; REPLAY</button>
+</div>
 <div id="debug-toggles">
   <label id="ai-mode-label">AI:
     <select id="ai-mode-select">
       <option value="heuristic">Heuristic</option>
+      <option value="llm">LLM (Claude)</option>
       <option value="rules" disabled>Rules (coming soon)</option>
       <option value="neural" disabled>Neural Net (coming soon)</option>
       <option value="hybrid" disabled>Hybrid (coming soon)</option>

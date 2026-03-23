@@ -110,9 +110,9 @@ All decisions made during the grill-me session on 2026-03-20.
 
 | Phase | Name | Status |
 |-------|------|--------|
-| 0 | Engine Extraction | ✅ Done. UX improvements & headless validation pending. |
-| 0.5 | LLM AI Mode (Story 20) | Not started |
-| 1 | Player Stats, Accuracy & Soccer Rules | Not started |
+| 0 | Engine Extraction | ✅ Done. UX improvements done (undo, order counter, tooltips, drag-only, accuracy cone, replay). |
+| 0.5 | LLM AI Mode (Story 20) | ✅ Done. Vite dev proxy, state serializer, response parser, heuristic fallback, reasoning display. |
+| 1 | Player Stats, Accuracy & Soccer Rules | ✅ Done. Stats, stamina, accuracy physics, futsal rules (halves, clock, subs, fouls). |
 | 2 | Game Mode Toggle (turn-based ↔ real-time) | Not started |
 | 3 | Rule Modifier System | Not started |
 | 4 | Server API + NL Translation | Not started |
@@ -128,9 +128,18 @@ All decisions made during the grill-me session on 2026-03-20.
 
 **Completed 2026-03-23**: Monolithic `index.html` extracted into `src/` modules (`engine.ts`, `ai.ts`, `renderer.ts`, `sprites.ts`, `ui.ts`, `types.ts`, `main.ts`). Vite + TypeScript build working. Game plays identically in browser.
 
-**Partially done**: AI mode switcher UI added (dropdown next to debug buttons) with `AIMode` type (`heuristic | rules | neural | hybrid`). Heuristic active, others stubbed as "coming soon". This was pulled forward from Phase 7 since the UI is trivial and sets up the architecture for future modes.
+AI mode switcher UI added (dropdown next to debug buttons) with `AIMode` type (`heuristic | llm | rules | neural | hybrid`). Heuristic and LLM active, others stubbed as "coming soon".
 
-**Not yet done**: UX improvements bundled with Phase 0 (tooltips, undo, order counter, pass danger viz, drag-only moves, round replay). Headless mode validation.
+**UX improvements completed 2026-03-23**:
+- Undo orders: right-click own player clears order; right-click ball carrier clears pass; "Clear all" button resets all team A orders
+- Order counter: "X/11 ordered" display next to Play button, green when all ordered
+- Pulsing rings on un-ordered team A players during plan phase
+- Contextual tooltips on hover during plan phase (shows available actions)
+- Drag-only moves: click on empty field no longer moves; click reserved for select + tackle
+- Accuracy cone: shown during right-drag pass/shot planning, reflects player stats + pressure
+- Round replay: "Replay" button after each play phase re-runs at 0.5x speed from snapshot
+
+**Not yet done**: Headless mode validation.
 
 ### Setup
 
@@ -247,9 +256,18 @@ These are interaction fixes to apply during the refactor:
 
 ---
 
-## Phase 0.5: LLM AI Mode (Story 20)
+## Phase 0.5: LLM AI Mode (Story 20) ✅ DONE
 
 **Goal**: Add an LLM-powered AI mode where Claude Sonnet steers team B. The LLM plans in parallel with the human — API call fires as soon as plan phase starts, play button disabled until response arrives.
+
+**Completed 2026-03-23**: Full implementation:
+- `src/ai-llm.ts`: State serializer (normalized 0-1 coords), response parser (strips markdown fences, validates JSON), API caller with error handling
+- `src/prompts/ai-plan.md`: System prompt with game rules, coordinate system, action types, response schema
+- `vite.config.ts`: Vite dev proxy plugin reads `.env` for `ANTHROPIC_API_KEY` + `LLM_MODEL`, forwards to Anthropic Messages API
+- "LLM (Claude)" option in AI mode dropdown (enabled, not disabled)
+- Async planning: Play button shows "AI thinking..." during API call, heuristic fallback on failure/timeout/malformed JSON
+- Per-player reasoning stored in `state.llmPlayerReasons`, visible in debug hover panel
+- `'llm'` added to `AIMode` type, `planAIForModeAsync()` handles the async flow
 
 ### Architecture
 
@@ -357,9 +375,21 @@ src/types.ts                — Add 'llm' to AIMode, add LLM state fields
 
 ---
 
-## Phase 1: Player Stats, Accuracy & Soccer Rules (Stories 10-13)
+## Phase 1: Player Stats, Accuracy & Soccer Rules (Stories 10-13) ✅ DONE
 
 **Goal**: Transform the toy simulation into a proper soccer game with player differentiation and real rules.
+
+**Completed 2026-03-23**: Full implementation of all four sub-phases:
+
+**1a. Player stats**: `PlayerStats` interface with 9 stats (speed, acceleration, stamina, staminaRecovery, passAccuracy, shotPower, shotAccuracy, tackling, foulRisk). `STAT_TEMPLATES` for GK/DEF/MID/FWD with ±10% random variation per player. Stats assigned at team creation.
+
+**1b. Stamina system**: Sprint detection (moves >60% of MOVE_RADIUS). Depletes at 1/tick when sprinting, recovers at `staminaRecovery` rate when not. Below 30 stamina → speed degrades proportionally (50%-100%). Walking speed = 60% of max. Visual stamina bar below each player (green→yellow→red), only shown when depleted.
+
+**1c. Accuracy physics**: `applyAccuracy()` function applies angular deviation to passes/shots. Base cone from accuracy stat (±(1-acc)*15°), widened by pressure (nearby opponents within 60px, +30% per), widened by fatigue (below 50% stamina). Integrated into `kickBall()`. Tackles now use player's `tackling` stat instead of global `TACKLE_SUCCESS`. Failed tackles check `foulRisk` for foul (extra cooldown for now, full set-piece system in future).
+
+**1d. Soccer rules (futsal MVP)**: `RulesConfig` interface with `RULES_FUTSAL` and `RULES_OUTDOOR` presets. `GameState` expanded with: `half` (1|2), `roundsPerHalf` (30), cosmetic `clockMinutes`, `subsRemaining` [3,3], `bench` players (1 DEF + 1 MID + 1 FWD per team, full stamina), `setpiece`/`penalty` state (types defined, execution not yet wired), stat counters (fouls, shots, passes, possession). Half-time detection and side-switching with stats overlay. Full-time detection after 60 rounds. `substitutePlayer()` function ready for UI integration.
+
+**Not yet done**: Free kick / penalty mini-game execution (types and state defined, gameplay not wired). Substitution UI (function exists, no buttons yet). Outdoor rules (offside, throw-ins, corners, goal kicks — config exists, code not implemented).
 
 ### 1a. Player stats (Story 10)
 

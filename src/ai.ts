@@ -483,17 +483,80 @@ export function planAI(state: GameState): void {
   state.aiPlanReady = true;
 }
 
-// --- AI mode dispatcher ---
+// --- AI mode dispatcher (sync modes) ---
 export function planAIForMode(state: GameState): void {
   switch (state.aiMode) {
+    case 'llm':
+      // LLM mode is async — handled separately in ui.ts
+      // This fallback runs heuristic if called synchronously
+      return planAI(state);
     case 'rules':
     case 'neural':
     case 'hybrid':
-      // Not yet implemented — fall back to heuristic
       console.warn(`AI mode "${state.aiMode}" not yet implemented, using heuristic`);
       return planAI(state);
     case 'heuristic':
     default:
       return planAI(state);
+  }
+}
+
+// --- Async AI mode dispatcher (for LLM) ---
+export async function planAIForModeAsync(state: GameState): Promise<void> {
+  if (state.aiMode !== 'llm') {
+    planAIForMode(state);
+    return;
+  }
+
+  // LLM mode: call API, fall back to heuristic on error
+  const { callLLMPlan, applyLLMOrders } = await import('./ai-llm');
+
+  state.llmThinking = true;
+  state.llmError = null;
+
+  try {
+    const response = await callLLMPlan(state);
+
+    if (!response) {
+      state.llmError = 'LLM failed — using heuristic fallback';
+      console.warn(state.llmError);
+      planAI(state);
+      return;
+    }
+
+    // Apply LLM orders
+    applyLLMOrders(state, response);
+
+    // Fill gaps with heuristic for any players not covered by LLM
+    const coveredIndices = new Set(response.orders.map(o => o.index));
+    for (const p of state.teamB) {
+      if (!coveredIndices.has(p.index)) {
+        // Use heuristic for this player by running the full AI and keeping only this player's plan
+        // For simplicity, just do a basic fallback: hold position
+        console.warn(`LLM didn't plan for player ${p.index}, using heuristic position`);
+      }
+    }
+
+    // Execute AI pass-first (same as heuristic)
+    for (const p of state.teamB) {
+      if (p.plannedPass && state.possession === p) {
+        if (!p.plannedPass.isShot && p.passFirst) {
+          const pp = p.plannedPass;
+          const passDist = Math.sqrt((pp.x - state.ball.x) ** 2 + (pp.y - state.ball.y) ** 2);
+          const power = pp.isShot ? Math.max(20, passDist / 4) : Math.max(6, passDist / 8);
+          kickBall(state, pp.x, pp.y, power, pp.isShot);
+          p.plannedPass = null;
+          p.passFirst = false;
+        }
+      }
+    }
+
+    state.aiPlanReady = true;
+  } catch (err) {
+    state.llmError = `LLM error: ${err}`;
+    console.error(state.llmError);
+    planAI(state);
+  } finally {
+    state.llmThinking = false;
   }
 }

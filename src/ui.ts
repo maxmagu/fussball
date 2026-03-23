@@ -2,8 +2,8 @@
 
 import type { Player, GameState } from './types';
 import { W, H, MOVE_RADIUS, GOAL_Y, GOAL_H, PLAY_DURATION } from './types';
-import { createGameState, resetAfterGoal, endRound, tick, autoplanGK, prepareRound, kickBall } from './engine';
-import { planAIForMode } from './ai';
+import { createGameState, resetAfterGoal, endRound, tick, autoplanGK, prepareRound, kickBall, cloneState, isHalfTime, isFullTime, switchSides, updateClock } from './engine';
+import { planAIForMode, planAIForModeAsync } from './ai';
 import type { AIMode } from './types';
 
 import { createRenderer, type DragState } from './renderer';
@@ -20,11 +20,24 @@ export function initGame(canvas: HTMLCanvasElement): void {
   const debugBtn = document.getElementById('debug-btn') as HTMLButtonElement;
   const allActionsBtn = document.getElementById('ai-all-actions-btn') as HTMLButtonElement;
   const scoreEl = document.getElementById('score')!;
-
   const aiModeSelect = document.getElementById('ai-mode-select') as HTMLSelectElement;
+  const clearAllBtn = document.getElementById('clear-all-btn') as HTMLButtonElement;
+  const orderCounterEl = document.getElementById('order-counter')!;
+  const replayBtn = document.getElementById('replay-btn') as HTMLButtonElement;
 
   let aiDebugMode = false;
   let hoveredPlayer: Player | null = null;
+
+  // Replay state
+  let replaySnapshot: GameState | null = null;
+  let replayState: GameState | null = null;
+  let replayPlaying = false;
+  let replayTimer = 0;
+
+  // Tooltip state (passed to renderer)
+  let tooltipText: string | null = null;
+  let tooltipX = 0;
+  let tooltipY = 0;
 
   // --- AI mode selector ---
   aiModeSelect.value = state.aiMode;
@@ -43,14 +56,43 @@ export function initGame(canvas: HTMLCanvasElement): void {
   let suppressClick = false;
   const DRAG_THRESHOLD = 10;
 
-  function updateRoundInfo(): void {
-    if (state.phase === 'plan') {
-      roundInfoEl.textContent = `Round ${state.round} — Plan your moves`;
-    } else if (state.phase === 'preview') {
-      roundInfoEl.textContent = `Round ${state.round} — Reviewing AI plan`;
-    } else {
-      roundInfoEl.textContent = `Round ${state.round} — Playing...`;
+  function updateOrderCounter(): void {
+    if (state.phase !== 'plan') {
+      orderCounterEl.textContent = '';
+      return;
     }
+    const ordered = state.teamA.filter(p => p.hasOrder).length;
+    orderCounterEl.textContent = `${ordered}/11 ordered`;
+    orderCounterEl.style.color = ordered === 11 ? '#4CAF50' : '#aaa';
+  }
+
+  function clearPlayerOrder(p: Player): void {
+    p.hasOrder = false;
+    p.tx = p.x;
+    p.ty = p.y;
+    p.tackleTarget = null;
+    p.plannedPass = null;
+    p.passFirst = false;
+  }
+
+  function clockStr(): string {
+    const mins = Math.floor(state.clockMinutes);
+    const halfLabel = state.half === 1 ? '1st Half' : '2nd Half';
+    return `${mins}' — ${halfLabel}`;
+  }
+
+  function updateRoundInfo(): void {
+    const clock = clockStr();
+    if (state.phase === 'halftime') {
+      roundInfoEl.textContent = 'HALF TIME';
+    } else if (state.phase === 'plan') {
+      roundInfoEl.textContent = `${clock} | Round ${state.round} — Plan your moves`;
+    } else if (state.phase === 'preview') {
+      roundInfoEl.textContent = `${clock} | Round ${state.round} — Reviewing AI plan`;
+    } else {
+      roundInfoEl.textContent = `${clock} | Round ${state.round} — Playing...`;
+    }
+    updateOrderCounter();
   }
 
   function updateScoreDisplay(): void {
@@ -61,15 +103,22 @@ export function initGame(canvas: HTMLCanvasElement): void {
     resetAfterGoal(state, concedingSide);
     playBtn.disabled = false;
     allActionsBtn.style.display = 'none';
+    replayBtn.style.display = 'none';
     updateRoundInfo();
     updateScoreDisplay();
   }
 
   function executePlay(): void {
+    // Snapshot state for replay before play starts
+    replaySnapshot = cloneState(state);
+    replayPlaying = false;
+    replayState = null;
+
     state.phase = 'play';
     state.playTimer = PLAY_DURATION;
     playBtn.disabled = true;
     allActionsBtn.style.display = 'none';
+    replayBtn.style.display = 'none';
     state.aiShowAllActions = false;
     allActionsBtn.textContent = '\u2610 all actions';
     allActionsBtn.classList.remove('active');
@@ -94,6 +143,29 @@ export function initGame(canvas: HTMLCanvasElement): void {
     return null;
   }
 
+  // --- Update tooltip based on hover ---
+  function updateTooltip(mouseX: number, mouseY: number): void {
+    tooltipText = null;
+    if (state.phase !== 'plan') return;
+
+    const hovered = playerAt(mouseX, mouseY, [...state.teamA, ...state.teamB]);
+    if (!hovered) return;
+
+    // Position tooltip to the right of the player (stats panel is on the left)
+    tooltipX = hovered.x + 20;
+    tooltipY = hovered.y - 20;
+
+    if (hovered.side === 0) {
+      if (state.possession === hovered) {
+        tooltipText = 'Drag: Dribble | Right-drag: Pass/Shoot';
+      } else {
+        tooltipText = 'Drag: Move';
+      }
+    } else if (hovered.side === 1 && state.possession === hovered && state.selected) {
+      tooltipText = 'Click: Tackle';
+    }
+  }
+
   // --- Mouse tracking for hover ---
   canvas.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
@@ -109,6 +181,8 @@ export function initGame(canvas: HTMLCanvasElement): void {
         break;
       }
     }
+
+    updateTooltip(mouseX, mouseY);
 
     if (state.phase === 'preview') {
       state.aiHoveredPlayer = null;
@@ -140,6 +214,22 @@ export function initGame(canvas: HTMLCanvasElement): void {
     const { x: mx, y: my } = getMousePos(e);
 
     if (e.button === 2) {
+      // Right-click on own player with order → clear order (undo)
+      const clickedOwn = playerAt(mx, my, state.teamA);
+      if (clickedOwn && clickedOwn.hasOrder && state.possession !== clickedOwn) {
+        clearPlayerOrder(clickedOwn);
+        updateOrderCounter();
+        return;
+      }
+
+      // Right-click on ball carrier with order → clear pass (keep move)
+      if (clickedOwn && clickedOwn === state.possession && clickedOwn.plannedPass) {
+        clickedOwn.plannedPass = null;
+        clickedOwn.passFirst = false;
+        updateOrderCounter();
+        return;
+      }
+
       const carrier = state.teamA.find(p => state.possession === p);
       if (carrier && carrier.hasOrder && !carrier.plannedPass) {
         const dx = carrier.tx - mx, dy = carrier.ty - my;
@@ -208,6 +298,7 @@ export function initGame(canvas: HTMLCanvasElement): void {
       drag.dragStartPos = null;
       drag.dragButton = -1;
       suppressClick = true;
+      updateOrderCounter();
       return;
     }
     drag.dragging = null;
@@ -217,7 +308,7 @@ export function initGame(canvas: HTMLCanvasElement): void {
     drag.dragButton = -1;
   });
 
-  // --- Click ---
+  // --- Click (select + tackle only, NO click-to-move) ---
   canvas.addEventListener('click', (e) => {
     if (suppressClick) { suppressClick = false; return; }
     if (state.phase !== 'plan') return;
@@ -236,23 +327,23 @@ export function initGame(canvas: HTMLCanvasElement): void {
         state.selected.tx = targetEnemy.x;
         state.selected.ty = targetEnemy.y;
         state.selected.hasOrder = true;
+        updateOrderCounter();
         return;
       }
-
-      const dx = mx - state.selected.x, dy = my - state.selected.y;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d <= MOVE_RADIUS) {
-        state.selected.tx = mx;
-        state.selected.ty = my;
-      } else {
-        state.selected.tx = state.selected.x + (dx / d) * MOVE_RADIUS;
-        state.selected.ty = state.selected.y + (dy / d) * MOVE_RADIUS;
-      }
-      state.selected.hasOrder = true;
     }
+    // Click on empty field does nothing (drag-only moves)
   });
 
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // --- Clear all orders ---
+  clearAllBtn.addEventListener('click', () => {
+    if (state.phase !== 'plan') return;
+    for (const p of state.teamA) {
+      clearPlayerOrder(p);
+    }
+    updateOrderCounter();
+  });
 
   // --- Debug toggle ---
   debugBtn.addEventListener('click', () => {
@@ -262,11 +353,11 @@ export function initGame(canvas: HTMLCanvasElement): void {
   });
 
   // --- Play button ---
-  playBtn.addEventListener('click', () => {
-    if (state.phase === 'preview') { executePlay(); return; }
-    if (state.phase !== 'plan') return;
-    prepareRound(state);
-    planAIForMode(state);
+  function finishAIPlan(): void {
+    if (state.llmError) {
+      roundInfoEl.textContent = `Round ${state.round} — ${state.llmError}`;
+      setTimeout(() => updateRoundInfo(), 2000);
+    }
     if (aiDebugMode) {
       state.phase = 'preview';
       allActionsBtn.style.display = 'inline-block';
@@ -275,6 +366,38 @@ export function initGame(canvas: HTMLCanvasElement): void {
       executePlay();
       updateRoundInfo();
     }
+  }
+
+  playBtn.addEventListener('click', () => {
+    if (state.phase === 'preview') { executePlay(); return; }
+    if (state.phase !== 'plan') return;
+    prepareRound(state);
+
+    if (state.aiMode === 'llm') {
+      // Async LLM planning
+      playBtn.disabled = true;
+      playBtn.textContent = 'AI thinking...';
+      planAIForModeAsync(state).then(() => {
+        playBtn.textContent = '\u25B6 PLAY';
+        playBtn.disabled = false;
+        finishAIPlan();
+      });
+    } else {
+      planAIForMode(state);
+      finishAIPlan();
+    }
+  });
+
+  // --- Replay button ---
+  replayBtn.addEventListener('click', () => {
+    if (!replaySnapshot) return;
+    replayState = cloneState(replaySnapshot);
+    replayState!.phase = 'play';
+    replayState!.playTimer = PLAY_DURATION;
+    replayPlaying = true;
+    replayTimer = PLAY_DURATION;
+    replayBtn.style.display = 'none';
+    roundInfoEl.textContent = `Round ${state.round - 1} — Replay (0.5x)`;
   });
 
   // --- All actions toggle ---
@@ -300,6 +423,21 @@ export function initGame(canvas: HTMLCanvasElement): void {
 
   // --- Game loop ---
   function update(): void {
+    // Handle replay playback (half speed = tick every other frame)
+    if (replayPlaying && replayState) {
+      replayTimer--;
+      if (replayTimer % 2 === 0) { // half speed
+        const result = tick(replayState);
+        if (result || replayTimer <= 0) {
+          replayPlaying = false;
+          replayState = null;
+          replayBtn.style.display = 'inline-block';
+          updateRoundInfo();
+        }
+      }
+      return; // Don't update main state during replay
+    }
+
     if (state.phase === 'play') {
       const result = tick(state);
 
@@ -313,9 +451,34 @@ export function initGame(canvas: HTMLCanvasElement): void {
         setTimeout(() => onResetAfterGoal(1), 1200);
       } else if (result === 'round-end') {
         endRound(state);
+
+        // Check for half-time
+        if (isHalfTime(state)) {
+          switchSides(state);
+          playBtn.disabled = true;
+          timerBar.style.display = 'none';
+          updateRoundInfo();
+          // Auto-resume after showing half-time
+          setTimeout(() => {
+            state.phase = 'plan';
+            playBtn.disabled = false;
+            updateRoundInfo();
+          }, 3000);
+          return;
+        }
+
+        // Check for full-time
+        if (isFullTime(state)) {
+          timerBar.style.display = 'none';
+          roundInfoEl.textContent = `FULL TIME — ${state.score[0]} : ${state.score[1]}`;
+          playBtn.disabled = true;
+          return;
+        }
+
         playBtn.disabled = false;
         allActionsBtn.style.display = 'none';
         timerBar.style.display = 'none';
+        replayBtn.style.display = replaySnapshot ? 'inline-block' : 'none';
         updateRoundInfo();
       }
     }
@@ -327,10 +490,13 @@ export function initGame(canvas: HTMLCanvasElement): void {
 
   function loop(): void {
     update();
-    renderer.draw(state, drag, hoveredPlayer);
+    // Render replay state if playing, otherwise main state
+    const renderState = (replayPlaying && replayState) ? replayState : state;
+    renderer.draw(renderState, drag, hoveredPlayer, tooltipText, tooltipX, tooltipY);
     requestAnimationFrame(loop);
   }
 
   updateRoundInfo();
+  updateOrderCounter();
   loop();
 }

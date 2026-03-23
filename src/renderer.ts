@@ -139,8 +139,20 @@ export function createRenderer(canvas: HTMLCanvasElement) {
     // Pixel sprite
     drawPixelPlayer(ctx, p, palette);
 
-    // Jersey number tooltip
-    if (p === hoveredPlayer || p === state.selected) {
+    // Stamina bar (below sprite)
+    if (p.stats && p.currentStamina < p.stats.stamina * 0.95) {
+      const barW = 20, barH = 3;
+      const bx = p.x - barW / 2, by = p.y + p.radius + 2;
+      const ratio = p.currentStamina / p.stats.stamina;
+      const color = ratio > 0.6 ? '#4CAF50' : ratio > 0.3 ? '#FFC107' : '#f44336';
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(bx, by, barW, barH);
+      ctx.fillStyle = color;
+      ctx.fillRect(bx, by, barW * ratio, barH);
+    }
+
+    // Jersey number (always show on select, show on hover only if not showing stats panel)
+    if (p === state.selected && p !== hoveredPlayer) {
       const label = '' + (p.index + 1);
       ctx.font = 'bold 10px monospace';
       ctx.textAlign = 'center';
@@ -458,10 +470,56 @@ export function createRenderer(canvas: HTMLCanvasElement) {
       }
     }
 
+    // LLM reasoning display (hover panel for LLM-planned players)
+    if (state.llmPlayerReasons.size > 0 && state.aiHoveredPlayer && state.aiHoveredPlayer.side === 1) {
+      const reason = state.llmPlayerReasons.get(state.aiHoveredPlayer.index);
+      if (reason) {
+        const p = state.aiHoveredPlayer;
+        const maxW = 220;
+        ctx.save();
+        ctx.font = '11px monospace';
+        // Wrap text
+        const words = reason.split(' ');
+        const lines: string[] = [];
+        let line = '';
+        for (const w of words) {
+          const test = line ? line + ' ' + w : w;
+          if (ctx.measureText(test).width > maxW - 16) {
+            lines.push(line);
+            line = w;
+          } else {
+            line = test;
+          }
+        }
+        if (line) lines.push(line);
+
+        const lineH = 14;
+        const panelH = 10 + lines.length * lineH;
+        let px = p.x + 20, py = p.y + 25;
+        if (px + maxW > W - 10) px = p.x - maxW - 20;
+        if (py + panelH > H - 10) py = p.y - panelH - 10;
+
+        ctx.fillStyle = 'rgba(10,10,40,0.92)';
+        ctx.beginPath();
+        ctx.roundRect(px, py, maxW, panelH, 5);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(100,180,255,0.4)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = '#aaccff';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        for (let i = 0; i < lines.length; i++) {
+          ctx.fillText(lines[i], px + 8, py + 5 + i * lineH);
+        }
+        ctx.restore();
+      }
+    }
+
     // AI mood label
     const moodColors: Record<string, string> = { pressing: '#ff6060', counter: '#60d0ff', possession: '#80ff80', parkbus: '#ffcc40', balanced: '#cccccc' };
     const moodColor = moodColors[state.aiMood] || '#ffffff';
-    const moodLabel = 'AI: ' + state.aiMood;
+    const moodLabel = state.llmReasoning ? 'LLM' : 'AI: ' + state.aiMood;
     ctx.save();
     ctx.font = 'bold 13px monospace';
     const textW = ctx.measureText(moodLabel).width;
@@ -473,8 +531,167 @@ export function createRenderer(canvas: HTMLCanvasElement) {
     ctx.restore();
   }
 
+  // --- Pulsing ring for un-ordered players ---
+  let pulseTime = 0;
+  function drawPulsingRing(p: Player): void {
+    const alpha = 0.15 + Math.sin(pulseTime * 0.06) * 0.12;
+    const radius = p.radius + 6 + Math.sin(pulseTime * 0.06) * 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255, 235, 59, ${alpha})`;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // --- Accuracy cone during pass/shot drag ---
+  function drawAccuracyCone(drag: DragState, state: GameState): void {
+    if (!drag.dragging || !drag.dragMouse || !drag.dragActive || drag.dragButton !== 2) return;
+    if (state.possession !== drag.dragging) return;
+
+    const startX = drag.dragStartPos!.x;
+    const startY = drag.dragStartPos!.y;
+    const tx = drag.dragMouse.x;
+    const ty = drag.dragMouse.y;
+    const dx = tx - startX, dy = ty - startY;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d < 20) return;
+
+    // Use player stats if available
+    const isShot = drag.dragMouse.x > W * 0.82 && drag.dragMouse.y > GOAL_Y - 40 && drag.dragMouse.y < GOAL_Y + GOAL_H + 40;
+    const accuracy = drag.dragging.stats
+      ? (isShot ? drag.dragging.stats.shotAccuracy : drag.dragging.stats.passAccuracy)
+      : 0.85;
+    const baseAngle = (1 - accuracy) * 15 * (Math.PI / 180);
+
+    // Count nearby opponents for pressure
+    let pressure = 0;
+    for (const opp of state.teamB) {
+      if (dist(opp, drag.dragging) < 60) pressure++;
+    }
+    const maxAngle = baseAngle * (1 + pressure * 0.3);
+
+    const angle = Math.atan2(dy, dx);
+    const coneLen = d * 1.2;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(startX + Math.cos(angle - maxAngle) * coneLen, startY + Math.sin(angle - maxAngle) * coneLen);
+    ctx.lineTo(startX + Math.cos(angle + maxAngle) * coneLen, startY + Math.sin(angle + maxAngle) * coneLen);
+    ctx.closePath();
+    ctx.fillStyle = pressure > 0 ? 'rgba(255, 100, 100, 0.08)' : 'rgba(255, 235, 59, 0.06)';
+    ctx.fill();
+    ctx.strokeStyle = pressure > 0 ? 'rgba(255, 100, 100, 0.2)' : 'rgba(255, 235, 59, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // --- Tooltip ---
+  function drawTooltip(text: string | null, x: number, y: number): void {
+    if (!text) return;
+    ctx.save();
+    ctx.font = '11px monospace';
+    const tw = ctx.measureText(text).width;
+    let px = x;
+    if (px + tw + 12 > W - 10) px = W - tw - 22;
+    const py = Math.max(y - 35, 16);
+    ctx.fillStyle = 'rgba(10,10,30,0.88)';
+    ctx.beginPath();
+    ctx.roundRect(px - 6, py - 12, tw + 12, 18, 4);
+    ctx.fill();
+    ctx.fillStyle = '#ddd';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(text, px, py - 10);
+    ctx.restore();
+  }
+
+  // --- Player stats panel on hover ---
+  function drawStatsPanel(p: Player): void {
+    const role = aiRole(p);
+    const roleLabels: Record<string, string> = { gk: 'GK', def: 'DEF', mid: 'MID', fwd: 'FWD' };
+    const s = p.stats;
+    const teamLabel = p.side === 0 ? 'Blue' : 'Red';
+    const teamColor = p.side === 0 ? '#64b5f6' : '#ef9a9a';
+
+    const header = `#${p.index + 1} ${roleLabels[role]} (${teamLabel})`;
+    const rows = [
+      { label: 'SPD', val: s.speed, max: 4.0 },
+      { label: 'ACC', val: s.acceleration, max: 0.7 },
+      { label: 'STA', val: p.currentStamina, max: s.stamina },
+      { label: 'PAS', val: s.passAccuracy, max: 1.0 },
+      { label: 'SHT', val: s.shotPower, max: 15 },
+      { label: 'AIM', val: s.shotAccuracy, max: 1.0 },
+      { label: 'TKL', val: s.tackling, max: 1.0 },
+    ];
+
+    const panelW = 130;
+    const rowH = 14;
+    const panelH = 24 + rows.length * rowH + 4;
+    let px = p.x - panelW - 20;
+    let py = p.y - panelH / 2;
+    if (px < 10) px = p.x + 20;
+    if (py < 10) py = 10;
+    if (py + panelH > H - 10) py = H - panelH - 10;
+
+    ctx.save();
+
+    // Background
+    ctx.fillStyle = 'rgba(10,10,30,0.92)';
+    ctx.beginPath();
+    ctx.roundRect(px, py, panelW, panelH, 6);
+    ctx.fill();
+    ctx.strokeStyle = p.side === 0 ? 'rgba(33,150,243,0.5)' : 'rgba(244,67,54,0.5)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Header
+    ctx.font = 'bold 11px monospace';
+    ctx.fillStyle = teamColor;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(header, px + 8, py + 6);
+
+    // Stat rows with mini bars
+    const barX = px + 38;
+    const barW = 60;
+    const barH = 8;
+    for (let i = 0; i < rows.length; i++) {
+      const ry = py + 22 + i * rowH;
+      const r = rows[i];
+      const ratio = Math.min(r.val / r.max, 1);
+
+      // Label
+      ctx.font = '10px monospace';
+      ctx.fillStyle = '#999';
+      ctx.textAlign = 'left';
+      ctx.fillText(r.label, px + 8, ry);
+
+      // Bar background
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(barX, ry + 1, barW, barH);
+
+      // Bar fill
+      const barColor = ratio > 0.7 ? '#4CAF50' : ratio > 0.4 ? '#FFC107' : '#f44336';
+      ctx.fillStyle = barColor;
+      ctx.fillRect(barX, ry + 1, barW * ratio, barH);
+
+      // Value
+      ctx.font = '9px monospace';
+      ctx.fillStyle = '#ccc';
+      ctx.textAlign = 'left';
+      ctx.fillText(r.label === 'STA' ? `${Math.round(r.val)}` : r.val.toFixed(2), barX + barW + 4, ry);
+    }
+
+    ctx.restore();
+  }
+
   // --- Main draw ---
-  function draw(state: GameState, drag: DragState, hoveredPlayer: Player | null): void {
+  function draw(state: GameState, drag: DragState, hoveredPlayer: Player | null, tooltipText?: string | null, tooltipX?: number, tooltipY?: number): void {
+    pulseTime++;
     advanceAnimation();
     drawField();
 
@@ -486,10 +703,15 @@ export function createRenderer(canvas: HTMLCanvasElement) {
     ];
     allSorted.sort((a, b) => a.p.y - b.p.y);
     for (const { p } of allSorted) {
+      // Draw pulsing ring for un-ordered team A players during plan phase
+      if (state.phase === 'plan' && p.side === 0 && !p.hasOrder) {
+        drawPulsingRing(p);
+      }
       drawPlayer(p, state, hoveredPlayer);
       if (state.possession === p) drawBall(state);
     }
 
+    drawAccuracyCone(drag, state);
     drawDragLine(drag);
     drawGoalFlash(state);
 
@@ -515,6 +737,41 @@ export function createRenderer(canvas: HTMLCanvasElement) {
     if (state.phase === 'play') {
       ctx.fillStyle = 'rgba(0,0,0,0.03)';
       ctx.fillRect(0, 0, W, H);
+    }
+
+    // Half-time overlay
+    if (state.phase === 'halftime') {
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.save();
+      ctx.font = 'bold 48px monospace';
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('HALF TIME', W / 2, H / 2 - 60);
+
+      ctx.font = 'bold 32px monospace';
+      ctx.fillText(`${state.score[0]} : ${state.score[1]}`, W / 2, H / 2);
+
+      // Stats
+      ctx.font = '16px monospace';
+      ctx.fillStyle = '#aaa';
+      const totalPoss = state.possessionCount[0] + state.possessionCount[1] || 1;
+      const possA = Math.round(state.possessionCount[0] / totalPoss * 100);
+      ctx.fillText(`Possession: ${possA}% — ${100 - possA}%`, W / 2, H / 2 + 50);
+      ctx.fillText(`Fouls: ${state.foulCount[0]} — ${state.foulCount[1]}`, W / 2, H / 2 + 75);
+      ctx.fillText(`Subs remaining: ${state.subsRemaining[0]} — ${state.subsRemaining[1]}`, W / 2, H / 2 + 100);
+      ctx.restore();
+    }
+
+    // Player stats panel on hover
+    if (hoveredPlayer && hoveredPlayer.stats) {
+      drawStatsPanel(hoveredPlayer);
+    }
+
+    // Draw tooltip last (on top)
+    if (tooltipText) {
+      drawTooltip(tooltipText, tooltipX ?? 0, tooltipY ?? 0);
     }
   }
 
